@@ -5,21 +5,21 @@
 #include "PluginProcessor.h"
 
 /*==============================================================================
-    MIRROR · D — the MH SIGNATURE interface.
+    The MH SIGNATURE interface.
 
-    Everything is laid out in a fixed 1376 × 960 design space and scaled as one
-    unit, so the window can be resized from 50 % to 200 % without the layout
-    ever breaking.
+    Everything is laid out in a fixed 1440 × 900 design space at readable sizes
+    (11 px labels, 12 px module titles) and scaled as one unit.  The window can
+    be resized from 85 % to 200 %; the design is never squeezed below 85 %, so
+    type stays legible.
 ==============================================================================*/
 namespace mhui
 {
 
 //==============================================================================
-//  Palette — taken from design/tokens.json
+//  Palette — design/tokens.json
 //==============================================================================
 inline const juce::Colour noir       { 0xff050607 };
 inline const juce::Colour panelBg    { 0xff101216 };
-inline const juce::Colour panelBg2   { 0xff171a1f };
 inline const juce::Colour edgeCol    { 0xff24272d };
 inline const juce::Colour accent     { 0xffd0361c };
 inline const juce::Colour deepAccent { 0xff8f2412 };
@@ -32,12 +32,17 @@ enum class Fmt { int0, db1, pct0, hz, ms, sec1, ratio, raw1, dbInt };
 
 juce::String formatValue (float v, Fmt f);
 
-juce::Font labelFont  (float size, float kerning = 1.6f);
-juce::Font numberFont (float size, float kerning = 0.6f);
-juce::Font titleFont  (float size, float kerning = 2.4f);
-
 //==============================================================================
-//  Small pieces
+//  Type scale — big enough to read at 100 %
+//==============================================================================
+inline constexpr float typeLabel  = 10.5f;   // knob names
+inline constexpr float typeValue  = 9.5f;    // knob values
+inline constexpr float typeModule = 11.5f;   // module titles
+inline constexpr float typeSmall  = 9.0f;    // chips, tabs, hints
+
+juce::Font uiFont     (float size, bool bold = false, float kerning = 1.2f);
+juce::Font displayFont(float size, bool bold = false, float kerning = 2.4f);
+
 //==============================================================================
 class MhKnob : public juce::Slider
 {
@@ -52,16 +57,15 @@ public:
     void mouseEnter (const juce::MouseEvent&) override;
     void mouseExit  (const juce::MouseEvent&) override;
 
-    void setAccentGlow (float g)
-    {
-        const float ng = juce::jlimit (0.0f, 1.0f, g);
-        if (std::abs (ng - glow) > 0.015f) { glow = ng; repaint(); }
-    }
+    void setAccentGlow (float g);
+    void setDimmed (bool shouldDim);
+
+    juce::String knobLabel;
 
 private:
-    juce::String label;
     Fmt fmt;
     bool big;
+    bool dimmed = false;
     float glow = 0.0f;
     bool hovered = false;
     juce::RangedAudioParameter* param = nullptr;
@@ -71,72 +75,76 @@ private:
 };
 
 //==============================================================================
-/** A tiny on/off dot that drives a bool parameter. */
-class MhDot : public juce::Button
+/** The per-module OFF switch.  A pill that reads ON or OFF, so the state of
+    every module is obvious without hovering. */
+class PowerSwitch : public juce::Button
 {
 public:
-    MhDot (MHSignatureAudioProcessor& proc, const juce::String& paramId, float diameter);
+    PowerSwitch (MHSignatureAudioProcessor& proc,
+                 const juce::String& paramId,
+                 const juce::String& shortName);
 
-    void paintButton (juce::Graphics&, bool, bool) override;
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+
+    std::function<void()> onToggle;
+
+    juce::String moduleName;
 
 private:
-    juce::RangedAudioParameter* param = nullptr;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment;
-    float d;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MhDot)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PowerSwitch)
 };
 
 //==============================================================================
-/** A bordered panel with a title, an optional on/off dot, a reset gear and an
-    optional piece of module artwork above its knob row. */
+/** A bordered module card: title, ON/OFF switches, optional artwork, a row of
+    named knobs. */
 class ModulePanel : public juce::Component
 {
 public:
-    ModulePanel (MHSignatureAudioProcessor& proc,
-                 const juce::String& title,
-                 const juce::StringArray& resetIds);
+    ModulePanel (MHSignatureAudioProcessor& proc, const juce::String& title);
 
-    juce::Rectangle<int> getBodyArea() const;
-    juce::Rectangle<int> getArtArea (int artHeight) const;
-    juce::Rectangle<int> getKnobArea (int artHeight) const;
-
-    void setArt (int artHeight, std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer);
-
+    void addPower (const juce::String& paramId, const juce::String& shortName);
     void addKnob (const juce::String& id, const juce::String& label, Fmt fmt);
-    MhKnob* getKnob (int i) { return juce::isPositiveAndBelow (i, (int) knobs.size()) ? knobs[(size_t) i].get() : nullptr; }
+    void setArt (int artHeight,
+                 std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer);
+    void setCaption (const juce::String& text, bool drawOnTop = false);
 
-    void addDot (const juce::String& id);
-    MhDot* getDot() { return dot.get(); }
+    bool isAnyModuleOn() const;
+    void refreshDimming();
 
-    /** Dims panels that do not belong to the selected tab. */
     void setFocused (bool shouldBeFocused);
 
     void paint (juce::Graphics&) override;
     void resized() override;
-    void mouseUp (const juce::MouseEvent&) override;
 
-    juce::String panelTitle;
-    bool centreTitle = false;
-    juce::String caption;
+    juce::Rectangle<int> getBodyArea() const;
+    juce::Rectangle<int> getArtArea() const;
+    juce::Rectangle<int> getKnobArea() const;
+
+    juce::String title;
+
+    /** Extra placement for children that are not knobs (engine macros, chips). */
+    std::function<void()> customLayout;
 
 private:
     MHSignatureAudioProcessor& proc;
-    juce::StringArray resetParams;
     std::vector<std::unique_ptr<MhKnob>> knobs;
-    std::unique_ptr<MhDot> dot;
-    int artH = 0;
-    std::function<void (juce::Graphics&, juce::Rectangle<float>)> artDrawer;
-    bool focused = true;
-    bool gearHover = false;
+    std::vector<std::unique_ptr<PowerSwitch>> powers;
 
-    juce::Rectangle<int> gearBounds() const;
+    std::function<void (juce::Graphics&, juce::Rectangle<float>)> artDrawer;
+    int artH = 0;
+    juce::String caption;
+    bool captionOnTop = false;
+    bool focused = true;
+
+    juce::Rectangle<int> headerArea() const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModulePanel)
 };
 
 //==============================================================================
-/** Cycles a choice parameter on click; used for the saturation character. */
+/** Cycles a choice parameter on click. */
 class ChoiceChip : public juce::Component
 {
 public:
@@ -155,12 +163,10 @@ private:
 };
 
 //==============================================================================
-/** Vertical input / output meter with a dB scale. */
 class LevelMeter : public juce::Component
 {
 public:
     LevelMeter (MHSignatureAudioProcessor& proc, bool inputSide);
-
     void paint (juce::Graphics&) override;
 
 private:
@@ -171,17 +177,17 @@ private:
 };
 
 //==============================================================================
-/** Header tab strip with an accent pill on the active tab. */
 class TabStrip : public juce::Component
 {
 public:
     TabStrip();
     void paint (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
 
     std::function<void (int)> onTabChanged;
     int getIndex() const { return current; }
-    void setIndex (int i, bool notify = true);
 
 private:
     juce::StringArray items { "ALL", "EQ", "DYN", "COLOR", "SPACE", "MOD", "IMAGE" };
@@ -194,7 +200,6 @@ private:
 };
 
 //==============================================================================
-/** The preset pill: chevrons for stepping, body opens the browser menu. */
 class PresetBar : public juce::Component
 {
 public:
@@ -209,14 +214,10 @@ private:
     void showBrowser();
 
     MHSignatureAudioProcessor& proc;
-    int hoverZone = 0;   // -1 prev, +1 next, 0 body
+    int hoverZone = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PresetBar)
 };
-
-//==============================================================================
-/** The signature "Milad" mark, drawn as a path so it scales cleanly. */
-juce::Path makeSignaturePath();
 
 //==============================================================================
 class SpectrumPanel;
@@ -230,11 +231,10 @@ public:
     ~Canvas() override;
 
     void paint (juce::Graphics&) override;
-    void resized() override;
     void timerCallback() override;
 
-    static constexpr int designW = 1376;
-    static constexpr int designH = 960;
+    static constexpr int designW = 1440;
+    static constexpr int designH = 900;
 
 private:
     void buildLayout();
@@ -242,21 +242,20 @@ private:
 
     MHSignatureAudioProcessor& proc;
     juce::Image portrait;
-    juce::Path signature;
     float lfoPhase = 0.0f;
     float engineGlow = 0.0f;
 
-    std::unique_ptr<MhKnob> engineKnob;
+    std::unique_ptr<ModulePanel> enginePanel, eqPanel, dynPanel, satPanel,
+                                 vocPanel, spacePanel, imgPanel,
+                                 modPanel, trnPanel, ioPanel;
     std::vector<std::unique_ptr<MhKnob>> engineMacros;
-    std::unique_ptr<ModulePanel> enginePanel, eqPanel, compPanel, satPanel,
-                                 revPanel, dlyPanel, modPanel, imgPanel,
-                                 vocPanel, trnPanel, utilPanel;
-    std::unique_ptr<SpectrumPanel> spectrumPanel;
+    std::unique_ptr<MhKnob> engineKnob;
     std::unique_ptr<ChoiceChip> satType;
+    std::unique_ptr<PowerSwitch> monoSwitch, bypassSwitch;
     std::unique_ptr<LevelMeter> inMeter, outMeter;
-    std::unique_ptr<MhDot> monoDot, bypassDot;
     std::unique_ptr<TabStrip> tabs;
     std::unique_ptr<PresetBar> presetBar;
+    std::unique_ptr<SpectrumPanel> spectrumPanel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Canvas)
 };
@@ -275,9 +274,8 @@ public:
 
 private:
     MHSignatureAudioProcessor& proc;
-
     mhui::Canvas canvas;
-    juce::TooltipWindow tooltips { nullptr, 800 };
+    juce::TooltipWindow tooltips { nullptr, 900 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MHSignatureAudioProcessorEditor)
 };

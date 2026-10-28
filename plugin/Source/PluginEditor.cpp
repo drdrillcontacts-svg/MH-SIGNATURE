@@ -18,7 +18,7 @@ juce::String formatValue (float v, Fmt f)
         case Fmt::raw1:  return juce::String (v, 1);
 
         case Fmt::hz:
-            if (v >= 1000.0f) return juce::String (v / 1000.0f, 1) + " kHz";
+            if (v >= 1000.0f) return juce::String (v / 1000.0f, 1) + " k";
             return juce::String ((int) std::round (v)) + " Hz";
 
         case Fmt::ms:
@@ -29,22 +29,54 @@ juce::String formatValue (float v, Fmt f)
     return juce::String (v, 2);
 }
 
-juce::Font labelFont (float size, float kerning)
+juce::Font uiFont (float size, bool bold, float kerning)
 {
-    return juce::Font (juce::Font::getDefaultSansSerifFontName(), size, juce::Font::plain)
-             .withExtraKerningFactor (kerning * 0.06f);
+    return juce::Font (juce::Font::getDefaultSansSerifFontName(), size,
+                       bold ? juce::Font::bold : juce::Font::plain)
+             .withExtraKerningFactor (kerning * 0.055f);
 }
 
-juce::Font numberFont (float size, float kerning)
+juce::Font displayFont (float size, bool bold, float kerning)
 {
-    return juce::Font (juce::Font::getDefaultSansSerifFontName(), size, juce::Font::plain)
-             .withExtraKerningFactor (kerning * 0.06f);
+    return uiFont (size, bold, kerning);
 }
 
-juce::Font titleFont (float size, float kerning)
+namespace
 {
-    return juce::Font (juce::Font::getDefaultSansSerifFontName(), size, juce::Font::plain)
-             .withExtraKerningFactor (kerning * 0.06f);
+    float pv (MHSignatureAudioProcessor& p, const char* id)
+    {
+        if (auto* a = p.apvts.getRawParameterValue (id))
+            return a->load();
+        return 0.0f;
+    }
+
+    /** Draws text scaled down just enough to fit — labels never overlap. */
+    void fitText (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> area,
+                  float size, juce::Colour colour, juce::Justification just,
+                  bool bold = false, float kerning = 1.2f)
+    {
+        auto font = uiFont (size, bold, kerning);
+        const float needed = juce::GlyphArrangement::getStringWidth (font, text);
+
+        if (needed > area.getWidth() && needed > 0.0f)
+            font.setHeight (juce::jmax (7.0f, size * area.getWidth() / needed));
+
+        g.setFont (font);
+        g.setColour (colour);
+        g.drawText (text, area, just, false);
+    }
+
+    void fillPanelGlass (juce::Graphics& g, juce::Rectangle<float> r, float corner)
+    {
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff15181d), r.getX(), r.getY(),
+                                                 juce::Colour (0xff0a0c0f), r.getX(), r.getBottom(),
+                                                 false));
+        g.fillRoundedRectangle (r, corner);
+        g.setColour (juce::Colour (0x0bffffff));
+        g.fillRoundedRectangle (r.withHeight (r.getHeight() * 0.5f), corner);
+        g.setColour (edgeCol);
+        g.drawRoundedRectangle (r, corner, 1.0f);
+    }
 }
 
 //==============================================================================
@@ -53,14 +85,14 @@ MhKnob::MhKnob (MHSignatureAudioProcessor& proc,
                 const juce::String& labelText,
                 Fmt format,
                 bool bigStyle)
-    : label (labelText), fmt (format), big (bigStyle)
+    : knobLabel (labelText), fmt (format), big (bigStyle)
 {
     setSliderStyle (juce::Slider::RotaryVerticalDrag);
     setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
     setWantsKeyboardFocus (false);
     setOpaque (false);
     setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
-    setMouseDragSensitivity (big ? 320 : 220);
+    setMouseDragSensitivity (big ? 340 : 250);
 
     param = proc.apvts.getParameter (paramId);
 
@@ -68,10 +100,25 @@ MhKnob::MhKnob (MHSignatureAudioProcessor& proc,
     {
         const auto def = param->convertFrom0to1 (param->getDefaultValue());
         setDoubleClickReturnValue (true, def);
+        setTooltip (param->getName (64) + "  ·  double-click to reset");
     }
 
     attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         proc.apvts, paramId, *this);
+}
+
+void MhKnob::setAccentGlow (float g)
+{
+    const float ng = juce::jlimit (0.0f, 1.0f, g);
+    if (std::abs (ng - glow) > 0.02f) { glow = ng; repaint(); }
+}
+
+void MhKnob::setDimmed (bool shouldDim)
+{
+    if (dimmed == shouldDim) return;
+    dimmed = shouldDim;
+    setAlpha (dimmed ? 0.42f : 1.0f);
+    repaint();
 }
 
 void MhKnob::mouseEnter (const juce::MouseEvent&) { hovered = true;  repaint(); }
@@ -79,17 +126,15 @@ void MhKnob::mouseExit  (const juce::MouseEvent&) { hovered = false; repaint(); 
 
 void MhKnob::paint (juce::Graphics& g)
 {
-    auto b = getLocalBounds().toFloat().reduced (1.0f);
-    const float textH = 22.0f;
+    auto b = getLocalBounds().toFloat();
+    if (b.getWidth() < 12.0f || b.getHeight() < 12.0f) return;
 
-    const float d  = juce::jmin (b.getWidth() - 2.0f, b.getHeight() - textH);
-    if (d <= 8.0f) return;
-
-    const float totalH = d + textH;
-    const float top = b.getY() + juce::jmax (0.0f, (b.getHeight() - totalH) * 0.5f);
+    const float textH = big ? 34.0f : 27.0f;
+    const float d = juce::jmin (b.getWidth() - 2.0f, b.getHeight() - textH);
+    if (d < 18.0f) return;
 
     const float cx = b.getCentreX();
-    const float cy = top + d * 0.5f;
+    const float cy = b.getY() + (b.getHeight() - textH - d) * 0.5f + d * 0.5f;
     const float r  = d * 0.5f - 1.0f;
 
     const float startRad = juce::MathConstants<float>::pi * 1.25f;
@@ -97,199 +142,240 @@ void MhKnob::paint (juce::Graphics& g)
     const float sweep    = endRad - startRad;
 
     const float norm = (float) valueToProportionOfLength (getValue());
+    const float stroke = big ? 3.8f : 2.4f;
 
-    // ---- track -----------------------------------------------------------
+    // track
     juce::Path track;
-    track.addCentredArc (cx, cy, r - 1.5f, r - 1.5f, 0.0f, startRad, endRad, true);
-    g.setColour (juce::Colour (0xff2a2d33));
-    g.strokePath (track, juce::PathStrokeType (big ? 3.4f : 2.0f,
-                                               juce::PathStrokeType::curved,
+    track.addCentredArc (cx, cy, r - 1.8f, r - 1.8f, 0.0f, startRad, endRad, true);
+    g.setColour (juce::Colour (0xff2b2f36));
+    g.strokePath (track, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded));
 
-    // ---- value arc -------------------------------------------------------
+    // value arc
     if (norm > 0.002f)
     {
         juce::Path arc;
-        arc.addCentredArc (cx, cy, r - 1.5f, r - 1.5f, 0.0f, startRad,
+        arc.addCentredArc (cx, cy, r - 1.8f, r - 1.8f, 0.0f, startRad,
                            startRad + sweep * norm, true);
 
         if (glow > 0.01f)
         {
-            g.setColour (accent.withAlpha (0.22f * glow));
-            g.strokePath (arc, juce::PathStrokeType (big ? 12.0f : 7.0f,
-                                                     juce::PathStrokeType::curved,
+            g.setColour (accent.withAlpha (0.20f * glow));
+            g.strokePath (arc, juce::PathStrokeType (stroke * 4.0f, juce::PathStrokeType::curved,
                                                      juce::PathStrokeType::rounded));
         }
 
         g.setColour (hovered ? softAccent : accent);
-        g.strokePath (arc, juce::PathStrokeType (big ? 3.2f : 2.2f,
-                                                 juce::PathStrokeType::curved,
+        g.strokePath (arc, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
                                                  juce::PathStrokeType::rounded));
     }
 
-    // ---- body ------------------------------------------------------------
-    const float bodyR = r - (big ? 9.0f : 5.5f);
+    // body
+    const float bodyR = r - (big ? 10.0f : 6.5f);
 
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2b2e34), cx, cy - bodyR,
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2d3037), cx, cy - bodyR,
                                              juce::Colour (0xff08090b), cx, cy + bodyR, false));
     g.fillEllipse (cx - bodyR, cy - bodyR, bodyR * 2.0f, bodyR * 2.0f);
 
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0x33ffffff), cx - bodyR * 0.35f,
-                                             cy - bodyR * 0.55f, juce::Colours::transparentBlack,
-                                             cx + bodyR * 0.2f, cy + bodyR * 0.4f, true));
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0x30ffffff), cx - bodyR * 0.4f,
+                                             cy - bodyR * 0.6f, juce::Colours::transparentBlack,
+                                             cx + bodyR * 0.2f, cy + bodyR * 0.5f, true));
     g.fillEllipse (cx - bodyR, cy - bodyR, bodyR * 2.0f, bodyR * 2.0f);
 
-    g.setColour (juce::Colour (0x14ffffff));
+    g.setColour (juce::Colour (0x16ffffff));
     g.drawEllipse (cx - bodyR, cy - bodyR, bodyR * 2.0f, bodyR * 2.0f, 1.0f);
 
-    // ---- pointer ---------------------------------------------------------
+    // pointer
     const float angle = startRad + sweep * norm;
-    const float r0 = bodyR * 0.30f;
-    const float r1 = bodyR * 0.86f;
+    const float r0 = bodyR * 0.28f;
+    const float r1 = bodyR * 0.88f;
 
-    g.setColour (juce::Colour (0x66000000));
+    g.setColour (juce::Colour (0x70000000));
     g.drawLine (cx + std::sin (angle) * r0, cy - std::cos (angle) * r0,
-                cx + std::sin (angle) * r1, cy - std::cos (angle) * r1, 2.6f);
+                cx + std::sin (angle) * r1, cy - std::cos (angle) * r1, big ? 3.4f : 2.6f);
 
-    g.setColour (hovered ? softAccent : juce::Colour (0xffe7e2df));
+    g.setColour (hovered ? softAccent : juce::Colour (0xffeae4e0));
     g.drawLine (cx + std::sin (angle) * r0, cy - std::cos (angle) * r0,
-                cx + std::sin (angle) * r1, cy - std::cos (angle) * r1, 1.6f);
+                cx + std::sin (angle) * r1, cy - std::cos (angle) * r1, big ? 2.2f : 1.7f);
 
-    // ---- text ------------------------------------------------------------
-    const float labelY = cy + r + 2.0f;
-    auto labelRect = juce::Rectangle<float> (b.getX() - 6.0f, labelY + 3.0f, b.getWidth() + 12.0f, 11.0f);
-    auto valueRect = juce::Rectangle<float> (b.getX() - 6.0f, labelY + 14.0f, b.getWidth() + 12.0f, 11.0f);
+    // text
+    const float ty = cy + r + 4.0f;
 
-    g.setFont (labelFont (big ? 9.0f : 7.4f, big ? 2.0f : 1.2f));
-    g.setColour (juce::Colour (0xffd3d8de));
-    g.drawText (label, labelRect, juce::Justification::centred, false);
+    fitText (g, knobLabel,
+             { b.getX() - 8.0f, ty, b.getWidth() + 16.0f, big ? 14.0f : 13.0f },
+             big ? 11.0f : typeLabel,
+             juce::Colour (0xffd9dee4), juce::Justification::centred, true, 1.6f);
 
-    g.setFont (numberFont (big ? 9.0f : 7.4f, 0.4f));
-    g.setColour (softAccent.withAlpha (0.95f));
-    g.drawText (formatValue ((float) getValue(), fmt), valueRect, juce::Justification::centred, false);
+    fitText (g, formatValue ((float) getValue(), fmt),
+             { b.getX() - 8.0f, ty + (big ? 14.0f : 13.0f), b.getWidth() + 16.0f, 12.0f },
+             big ? 11.0f : typeValue,
+             softAccent, juce::Justification::centred, false, 0.4f);
 }
 
 //==============================================================================
-MhDot::MhDot (MHSignatureAudioProcessor& proc, const juce::String& paramId, float diameter)
-    : juce::Button (paramId), d (diameter)
+PowerSwitch::PowerSwitch (MHSignatureAudioProcessor& proc,
+                          const juce::String& paramId,
+                          const juce::String& shortName)
+    : juce::Button (paramId), moduleName (shortName)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    param = proc.apvts.getParameter (paramId);
+    setTooltip (shortName + ": click to take this module in or out of the chain");
     attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         proc.apvts, paramId, *this);
+
+    onClick = [this] { if (onToggle) onToggle(); repaint(); };
 }
 
-void MhDot::paintButton (juce::Graphics& g, bool over, bool)
+void PowerSwitch::paintButton (juce::Graphics& g, bool over, bool down)
 {
     const bool on = getToggleState();
-    auto b = getLocalBounds().toFloat();
-    const float cx = b.getCentreX(), cy = b.getCentreY();
 
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    const float corner = r.getHeight() * 0.5f;
+
+    g.setColour (on ? juce::Colour (0xff1c1512) : juce::Colour (0xff15181d));
+    g.fillRoundedRectangle (r, corner);
+
+    g.setColour (on ? accent.withAlpha (0.75f)
+                    : (over ? juce::Colour (0xff5b626c) : juce::Colour (0xff33373e)));
+    g.drawRoundedRectangle (r, corner, 1.0f);
+
+    auto dot = r.withWidth (r.getHeight()).reduced (r.getHeight() * 0.33f);
     if (on)
     {
-        g.setColour (accent.withAlpha (0.16f));
-        g.fillEllipse (cx - d * 0.5f, cy - d * 0.5f, d, d);
-
-        g.setColour (juce::Colour (0x22ff7a5f));
-        g.fillEllipse (cx - d * 0.95f, cy - d * 0.95f, d * 1.9f, d * 1.9f);
-
-        g.setColour (over ? softAccent : accent);
-        g.fillEllipse (cx - d * 0.34f, cy - d * 0.34f, d * 0.68f, d * 0.68f);
+        g.setColour (accent.withAlpha (0.28f));
+        g.fillEllipse (dot.expanded (2.0f));
+        g.setColour (down ? softAccent : accent);
+        g.fillEllipse (dot);
     }
     else
     {
-        g.setColour (juce::Colour (0xff3a3e45));
-        g.drawEllipse (cx - d * 0.34f, cy - d * 0.34f, d * 0.68f, d * 0.68f, 1.2f);
+        g.setColour (juce::Colour (0xff4a505a));
+        g.drawEllipse (dot, 1.2f);
     }
+
+    g.setFont (uiFont (r.getHeight() * 0.44f, true, 1.6f));
+    g.setColour (on ? juce::Colour (0xfff0e6e2) : (over ? juce::Colour (0xffb9c0c9)
+                                                        : juce::Colour (0xff767e88)));
+    g.drawText (on ? "ON" : "OFF",
+                r.withTrimmedLeft (r.getHeight() + 2.0f).withTrimmedRight (6.0f),
+                juce::Justification::centredLeft, false);
 }
 
 //==============================================================================
-ModulePanel::ModulePanel (MHSignatureAudioProcessor& p,
-                          const juce::String& title,
-                          const juce::StringArray& resetIds)
-    : panelTitle (title), proc (p), resetParams (resetIds)
+ModulePanel::ModulePanel (MHSignatureAudioProcessor& p, const juce::String& t)
+    : title (t), proc (p)
 {
     setInterceptsMouseClicks (true, true);
-    setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
-juce::Rectangle<int> ModulePanel::getBodyArea() const
+void ModulePanel::addPower (const juce::String& paramId, const juce::String& shortName)
 {
-    return getLocalBounds().reduced (13, 11).withTrimmedTop (20);
-}
-
-juce::Rectangle<int> ModulePanel::getArtArea (int artHeight) const
-{
-    auto body = getBodyArea();
-    if (artHeight <= 0) return {};
-    return body.removeFromTop (artHeight);
-}
-
-juce::Rectangle<int> ModulePanel::getKnobArea (int artHeight) const
-{
-    auto body = getBodyArea();
-    if (artHeight > 0) body.removeFromTop (artHeight + 2);
-    return body;
-}
-
-void ModulePanel::setArt (int artHeight,
-                          std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer)
-{
-    artH = artHeight;
-    artDrawer = std::move (drawer);
+    auto s = std::make_unique<PowerSwitch> (proc, paramId, shortName);
+    s->onToggle = [this] { repaint(); };
+    addAndMakeVisible (*s);
+    powers.push_back (std::move (s));
     resized();
-    repaint();
 }
 
 void ModulePanel::addKnob (const juce::String& id, const juce::String& label, Fmt fmt)
 {
     auto k = std::make_unique<MhKnob> (proc, id, label, fmt);
     addAndMakeVisible (*k);
-    k->setAlpha (focused ? 1.0f : 0.4f);
-    k->onValueChange = [this]
-    {
-        if (artH > 0) repaint (getArtArea (artH));
-    };
+    k->onValueChange = [this] { if (artH > 0) repaint (getArtArea()); };
     knobs.push_back (std::move (k));
     resized();
 }
 
-void ModulePanel::addDot (const juce::String& id)
+void ModulePanel::setArt (int, std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer)
 {
-    dot = std::make_unique<MhDot> (proc, id, 16.0f);
-    addAndMakeVisible (*dot);
+    artH = drawer != nullptr ? 1 : 0;
+    artDrawer = std::move (drawer);
     resized();
+    repaint();
 }
 
-juce::Rectangle<int> ModulePanel::gearBounds() const
+void ModulePanel::setCaption (const juce::String& text, bool onTop)
 {
-    return { getWidth() - 32, 8, 18, 18 };
+    caption = text;
+    captionOnTop = onTop;
+    repaint();
 }
+
+juce::Rectangle<int> ModulePanel::headerArea() const
+{
+    return getLocalBounds().reduced (13, 0).withHeight (34);
+}
+
+juce::Rectangle<int> ModulePanel::getBodyArea() const
+{
+    auto r = getLocalBounds().reduced (13, 9);
+    r.removeFromTop (26);
+    return r;
+}
+
+juce::Rectangle<int> ModulePanel::getKnobArea() const
+{
+    auto body = getBodyArea();
+    if (knobs.empty() || body.getHeight() < 30) return {};
+
+    const int wanted = juce::jmin (body.getHeight(), 96);
+    return artH == 0 ? body : body.removeFromBottom (wanted);
+}
+
+juce::Rectangle<int> ModulePanel::getArtArea() const
+{
+    auto body = getBodyArea();
+    if (artH == 0 || body.getHeight() < 40) return {};
+
+    body.removeFromBottom (getKnobArea().getHeight());
+    return body.withTrimmedBottom (4);
+}
+
+bool ModulePanel::isAnyModuleOn() const
+{
+    if (powers.empty()) return true;
+    for (const auto& s : powers)
+        if (s->getToggleState()) return true;
+    return false;
+}
+
+void ModulePanel::refreshDimming() { setFocused (focused); }
 
 void ModulePanel::setFocused (bool shouldBeFocused)
 {
     focused = shouldBeFocused;
 
-    for (auto& k : knobs) k->setAlpha (focused ? 1.0f : 0.4f);
-    if (dot != nullptr) dot->setAlpha (focused ? 1.0f : 0.4f);
+    const bool live = isAnyModuleOn();
+    for (auto& k : knobs) k->setDimmed (! focused || ! live);
 
     repaint();
 }
 
 void ModulePanel::resized()
 {
-    if (dot != nullptr)
-        dot->setBounds (getWidth() - 56, 9, 16, 16);
+    // power pills, right aligned in the header
+    const float ph = 20.0f;
+    float px = (float) getWidth() - 13.0f;
+
+    for (auto it = powers.rbegin(); it != powers.rend(); ++it)
+    {
+        const float w = juce::jlimit (46.0f, 66.0f, 24.0f + (float) (*it)->moduleName.length() * 6.0f);
+        px -= w;
+        (*it)->setBounds ((int) px, 8, (int) w, (int) ph);
+        px -= 6.0f;
+    }
+
+    if (customLayout) customLayout();
 
     const int n = (int) knobs.size();
     if (n == 0) return;
 
-    auto area = getKnobArea (artH);
-    if (area.getHeight() < 20) return;
+    auto area = getKnobArea();
+    if (area.getHeight() < 20 || area.getWidth() < 20) return;
 
-    const int rows = n <= 4 ? 1 : 2;
+    const int rows = n <= 6 ? 1 : 2;
     const int perRow = (n + rows - 1) / rows;
-
     const float slotW = (float) area.getWidth() / (float) perRow;
     const float slotH = (float) area.getHeight() / (float) rows;
 
@@ -304,78 +390,45 @@ void ModulePanel::resized()
     }
 }
 
-void ModulePanel::mouseUp (const juce::MouseEvent& e)
-{
-    if (gearBounds().contains (e.getPosition()) && resetParams.size() > 0)
-    {
-        for (const auto& id : resetParams)
-        {
-            if (auto* param = proc.apvts.getParameter (id))
-            {
-                param->beginChangeGesture();
-                param->setValueNotifyingHost (param->getDefaultValue());
-                param->endChangeGesture();
-            }
-        }
-    }
-}
-
 void ModulePanel::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat().reduced (0.5f);
-    const float corner = 7.0f;
+    const bool live = isAnyModuleOn();
+    const float alpha = focused ? 1.0f : 0.45f;
 
-    // glass body
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff14171c), r.getX(), r.getY(),
-                                             juce::Colour (0xff0b0d10), r.getX(), r.getBottom(), false));
-    g.fillRoundedRectangle (r, corner);
+    g.setOpacity (alpha);
+    fillPanelGlass (g, getLocalBounds().toFloat().reduced (0.5f), 8.0f);
 
-    g.setOpacity (focused ? 1.0f : 0.4f);
+    // header
+    fitText (g, title.toUpperCase(), headerArea().toFloat(),
+             typeModule, live ? juce::Colour (0xffe8ecf1) : juce::Colour (0xff7b828c),
+             juce::Justification::centredLeft, true, 2.2f);
 
-    g.setColour (juce::Colour (0x0effffff));
-    g.fillRoundedRectangle (r.withHeight (r.getHeight() * 0.45f), corner);
-
-    g.setColour (edgeCol);
-    g.drawRoundedRectangle (r, corner, 1.0f);
-
-    // title
-    if (panelTitle.isNotEmpty())
-    {
-        g.setFont (labelFont (9.4f, 1.9f));
-        g.setColour (juce::Colour (0xffe6eaef));
-        g.drawText (panelTitle, getLocalBounds().reduced (13, 0).withTrimmedTop (9).withHeight (14),
-                    centreTitle ? juce::Justification::centred
-                                : juce::Justification::centredLeft, false);
-    }
+    // a hairline under the header keeps the card calm
+    g.setColour (juce::Colour (0x12ffffff));
+    g.drawLine (13.0f, 33.0f, (float) getWidth() - 13.0f, 33.0f, 1.0f);
 
     if (caption.isNotEmpty())
     {
-        g.setFont (labelFont (7.4f, 2.6f));
-        g.setColour (juce::Colour (0xff8b939e));
-        g.drawText (caption, getLocalBounds().withTrimmedTop (getHeight() - 24).withHeight (14),
-                    juce::Justification::centred, false);
+        auto area = captionOnTop ? headerArea().toFloat()
+                                 : getLocalBounds().toFloat().removeFromBottom (18.0f);
+        fitText (g, caption, area,
+                 typeSmall, juce::Colour (0xff818a95),
+                 captionOnTop ? juce::Justification::centredRight
+                              : juce::Justification::centred,
+                 false, 2.4f);
     }
 
-    // reset gear
-    if (resetParams.size() > 0)
+    if (artDrawer != nullptr && getArtArea().getHeight() > 16)
+        artDrawer (g, getArtArea().toFloat());
+
+    g.setOpacity (1.0f);
+
+    // an off module reads as switched out of the chain
+    if (! live)
     {
-        auto gb = gearBounds().toFloat();
-        const float gcx = gb.getCentreX(), gcy = gb.getCentreY();
-        juce::Path gear;
-        gear.addCentredArc (gcx, gcy, 4.6f, 4.6f, 0.0f, 0.35f, 5.5f, true);
-        g.setColour (juce::Colour (gearHover ? 0xffb9c0c9 : 0xff565d66));
-        g.strokePath (gear, juce::PathStrokeType (1.1f, juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
-        for (int i = 0; i < 6; ++i)
-        {
-            const float a = juce::MathConstants<float>::twoPi * (float) i / 6.0f;
-            g.drawLine (gcx + std::sin (a) * 5.4f, gcy - std::cos (a) * 5.4f,
-                        gcx + std::sin (a) * 6.8f, gcy - std::cos (a) * 6.8f, 1.0f);
-        }
+        g.setColour (juce::Colour (0x66050607));
+        g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 8.0f);
     }
-
-    if (artDrawer != nullptr && artH > 0)
-        artDrawer (g, getArtArea (artH).toFloat());
 }
 
 //==============================================================================
@@ -385,29 +438,29 @@ ChoiceChip::ChoiceChip (MHSignatureAudioProcessor& p, const juce::String& paramI
 {
     param = proc.apvts.getParameter (paramId);
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setTooltip ("Click to change the saturation character");
 }
 
 void ChoiceChip::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (0.5f);
 
-    g.setColour (juce::Colour (0xff1b1e24));
-    g.fillRoundedRectangle (r, 4.0f);
-    g.setColour (accent.withAlpha (0.55f));
-    g.drawRoundedRectangle (r, 4.0f, 1.0f);
+    g.setColour (juce::Colour (0xff1a1d22));
+    g.fillRoundedRectangle (r, 5.0f);
+    g.setColour (juce::Colour (0xff333840));
+    g.drawRoundedRectangle (r, 5.0f, 1.0f);
 
     juce::String text = "--";
-
     if (auto* ch = dynamic_cast<juce::AudioParameterChoice*> (param))
         text = ch->getCurrentChoiceName().toUpperCase();
 
-    g.setFont (labelFont (7.6f, 1.4f));
-    g.setColour (juce::Colour (0xffe2e6eb));
-    g.drawText (text, r.reduced (6.0f, 0.0f), juce::Justification::centredLeft, false);
+    fitText (g, text, r.reduced (9.0f, 0.0f).withTrimmedRight (30.0f),
+             typeSmall + 0.5f, juce::Colour (0xffe6eaf0), juce::Justification::centredLeft,
+             true, 1.4f);
 
-    g.setFont (labelFont (7.0f, 0.6f));
+    g.setFont (uiFont (typeSmall - 2.0f, true, 1.2f));
     g.setColour (muted);
-    g.drawText ("TYPE", r.reduced (6.0f, 0.0f), juce::Justification::centredRight, false);
+    g.drawText (caption.toUpperCase(), r.reduced (9.0f, 0.0f), juce::Justification::centredRight, false);
 }
 
 void ChoiceChip::mouseUp (const juce::MouseEvent&)
@@ -433,23 +486,17 @@ void LevelMeter::paint (juce::Graphics& g)
 {
     auto b = getLocalBounds().toFloat();
 
-    const float readoutH = 18.0f;
-    auto readout = b.removeFromTop (readoutH);
-    auto barArea = b.reduced (0.0f, 4.0f);
-
+    auto readout = b.removeFromTop (22.0f);
     const float levelDb = isInput ? proc.getInputLevelDb() : proc.getOutputLevelDb();
 
-    // readout
-    juce::String txt = levelDb <= -99.0f ? "-inf dB" : juce::String (levelDb, 1) + " dB";
-    g.setFont (numberFont (8.6f, 0.6f));
-    g.setColour (juce::Colour (0xffd8dce2));
-    g.drawText (txt, readout, isInput ? juce::Justification::centredLeft
-                                      : juce::Justification::centredRight, false);
+    juce::String txt = levelDb <= -99.0f ? "-inf" : juce::String (levelDb, 1);
+    fitText (g, txt + " dB", readout, 10.0f, juce::Colour (0xffe2e7ee),
+             isInput ? juce::Justification::centredLeft : juce::Justification::centredRight,
+             true, 0.8f);
 
-    // scale labels sit next to the bar
-    const float barW = 9.0f;
-    juce::Rectangle<float> bar (isInput ? barArea.getX() + 8.0f : barArea.getRight() - 8.0f - barW,
-                                barArea.getY() + 6.0f, barW, barArea.getHeight() - 26.0f);
+    const float barW = 10.0f;
+    juce::Rectangle<float> bar (isInput ? b.getX() + 10.0f : b.getRight() - 10.0f - barW,
+                                b.getY() + 8.0f, barW, b.getHeight() - 30.0f);
 
     auto dbToY = [&] (float db)
     {
@@ -457,30 +504,25 @@ void LevelMeter::paint (juce::Graphics& g)
         return bar.getBottom() - n * bar.getHeight();
     };
 
-    // track
-    g.setColour (juce::Colour (0xff0e1014));
-    g.fillRoundedRectangle (bar.expanded (1.5f, 1.0f), 2.5f);
-    g.setColour (juce::Colour (0xff1e2127));
-    g.drawRoundedRectangle (bar.expanded (1.5f, 1.0f), 2.5f, 1.0f);
+    g.setColour (juce::Colour (0xff0d0f13));
+    g.fillRoundedRectangle (bar.expanded (2.0f, 1.0f), 2.5f);
+    g.setColour (juce::Colour (0xff1f232a));
+    g.drawRoundedRectangle (bar.expanded (2.0f, 1.0f), 2.5f, 1.0f);
 
-    // ticks + labels
-    g.setFont (numberFont (6.4f, 0.4f));
-    for (int db = 0; db >= -60; db -= 5)
+    for (int db = 0; db >= -60; db -= 6)
     {
         const float y = dbToY ((float) db);
-        g.setColour (juce::Colour (0x26ffffff));
+        g.setColour (juce::Colour (0x22ffffff));
         g.drawLine (isInput ? bar.getX() - 3.0f : bar.getRight(),
                     y, isInput ? bar.getX() - 1.0f : bar.getRight() + 2.0f, y, 1.0f);
 
-        g.setColour (juce::Colour (0xff5c636d));
-        auto lr = juce::Rectangle<float> (isInput ? bar.getRight() + 5.0f : bar.getX() - 27.0f,
-                                          y - 5.0f, 22.0f, 10.0f);
-        g.drawText (juce::String (db), lr,
-                    isInput ? juce::Justification::centredLeft : juce::Justification::centredRight,
-                    false);
+        auto lr = juce::Rectangle<float> (isInput ? bar.getRight() + 6.0f : bar.getX() - 26.0f,
+                                          y - 6.0f, 20.0f, 12.0f);
+        fitText (g, juce::String (db), lr, 8.0f, juce::Colour (0xff5f6873),
+                 isInput ? juce::Justification::centredLeft
+                         : juce::Justification::centredRight, false, 0.2f);
     }
 
-    // filled portion
     const float n = juce::jlimit (0.0f, 1.0f, (levelDb + 60.0f) / 60.0f);
     if (n > 0.001f)
     {
@@ -491,8 +533,8 @@ void LevelMeter::paint (juce::Graphics& g)
                                                  softAccent, bar.getX(), bar.getY(), false));
         g.fillRoundedRectangle (fill, 2.0f);
 
-        g.setColour (softAccent.withAlpha (0.85f));
-        g.fillRect (bar.getX() - 2.0f, fill.getY() - 1.0f, bar.getWidth() + 4.0f, 1.6f);
+        g.setColour (softAccent);
+        g.fillRect (bar.getX() - 3.0f, fill.getY() - 1.0f, bar.getWidth() + 6.0f, 2.0f);
     }
 }
 
@@ -500,30 +542,21 @@ void LevelMeter::paint (juce::Graphics& g)
 TabStrip::TabStrip()
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setInterceptsMouseClicks (true, false);
 }
 
 juce::Rectangle<float> TabStrip::tabBounds (int i) const
 {
-    if (i < 0 || i >= items.size()) return {};
     const float w = (float) getWidth() / (float) items.size();
-    return { (float) i * w + 2.0f, 2.0f, w - 4.0f, (float) getHeight() - 4.0f };
-}
-
-void TabStrip::setIndex (int i, bool notify)
-{
-    current = juce::jlimit (0, items.size() - 1, i);
-    repaint();
-    if (notify && onTabChanged) onTabChanged (current);
+    return { (float) i * w + 3.0f, 3.0f, w - 6.0f, (float) getHeight() - 6.0f };
 }
 
 void TabStrip::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    g.setColour (juce::Colour (0xff0d0f13));
-    g.fillRoundedRectangle (r, 16.0f);
-    g.setColour (juce::Colour (0xff1c1f25));
-    g.drawRoundedRectangle (r.reduced (0.5f), 16.0f, 1.0f);
+    g.setColour (juce::Colour (0xff0c0e12));
+    g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
+    g.setColour (juce::Colour (0xff1d2026));
+    g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, 1.0f);
 
     for (int i = 0; i < items.size(); ++i)
     {
@@ -531,29 +564,37 @@ void TabStrip::paint (juce::Graphics& g)
 
         if (i == current)
         {
-            g.setColour (accent.withAlpha (0.18f));
-            g.fillRoundedRectangle (tb.expanded (2.0f, 3.0f), 14.0f);
             g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe04a2a), tb.getX(), tb.getY(),
                                                      deepAccent, tb.getX(), tb.getBottom(), false));
-            g.fillRoundedRectangle (tb.expanded (1.0f, 2.0f), 14.0f);
-            g.setColour (juce::Colour (0xfff7ded7));
-        }
-        else
-        {
-            g.setColour (i == hovered ? juce::Colour (0xffd6dbe2) : muted);
+            g.fillRoundedRectangle (tb, tb.getHeight() * 0.5f);
         }
 
-        g.setFont (labelFont (7.8f, 1.8f));
-        g.drawText (items[i], tb, juce::Justification::centred, false);
+        fitText (g, items[i], tb, typeSmall + 0.6f,
+                 i == current ? juce::Colour (0xfff8e2db)
+                              : (i == hovered ? juce::Colour (0xffe2e7ee) : muted),
+                 juce::Justification::centred, true, 2.0f);
     }
 }
+
+void TabStrip::mouseMove (const juce::MouseEvent& e)
+{
+    int h = -1;
+    for (int i = 0; i < items.size(); ++i)
+        if (tabBounds (i).contains (e.position)) h = i;
+
+    if (h != hovered) { hovered = h; repaint(); }
+}
+
+void TabStrip::mouseExit (const juce::MouseEvent&) { hovered = -1; repaint(); }
 
 void TabStrip::mouseUp (const juce::MouseEvent& e)
 {
     for (int i = 0; i < items.size(); ++i)
         if (tabBounds (i).contains (e.position))
         {
-            setIndex (i);
+            current = i;
+            repaint();
+            if (onTabChanged) onTabChanged (current);
             return;
         }
 }
@@ -562,65 +603,50 @@ void TabStrip::mouseUp (const juce::MouseEvent& e)
 PresetBar::PresetBar (MHSignatureAudioProcessor& p) : proc (p)
 {
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    setInterceptsMouseClicks (true, false);
+    setTooltip ("Click to browse the 100 factory presets");
 }
 
 void PresetBar::mouseMove (const juce::MouseEvent& e)
 {
-    const int z = e.position.x < 26.0f ? -1 : (e.position.x > (float) getWidth() - 26.0f ? 1 : 0);
+    const int z = e.position.x < 28.0f ? -1
+                                       : (e.position.x > (float) getWidth() - 28.0f ? 1 : 0);
     if (z != hoverZone) { hoverZone = z; repaint(); }
 }
 
-void PresetBar::mouseExit (const juce::MouseEvent&)
-{
-    hoverZone = 0;
-    repaint();
-}
+void PresetBar::mouseExit (const juce::MouseEvent&) { hoverZone = 0; repaint(); }
 
 void PresetBar::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (0.5f);
 
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff15181d), r.getX(), r.getY(),
-                                             juce::Colour (0xff0c0e11), r.getX(), r.getBottom(), false));
-    g.fillRoundedRectangle (r, 20.0f);
-    g.setColour (juce::Colour (0xff2a2e35));
-    g.drawRoundedRectangle (r, 20.0f, 1.0f);
+    fillPanelGlass (g, r, r.getHeight() * 0.5f);
 
-    // chevrons
-    g.setFont (labelFont (10.0f, 0.0f));
-    g.setColour (hoverZone == -1 ? softAccent : juce::Colour (0xff868e99));
-    g.drawText (juce::CharPointer_UTF8 ("\xe2\x80\xb9"), r.withWidth (26.0f),
-                juce::Justification::centred, false);
-    g.setColour (hoverZone == 1 ? softAccent : juce::Colour (0xff868e99));
-    g.drawText (juce::CharPointer_UTF8 ("\xe2\x80\xba"), r.withTrimmedLeft (r.getWidth() - 26.0f),
-                juce::Justification::centred, false);
+    g.setFont (uiFont (13.0f, false, 0.0f));
+    g.setColour (hoverZone == -1 ? softAccent : juce::Colour (0xff8b939e));
+    g.drawText ("<", r.withWidth (28.0f), juce::Justification::centred, false);
+    g.setColour (hoverZone == 1 ? softAccent : juce::Colour (0xff8b939e));
+    g.drawText (">", r.withTrimmedLeft (r.getWidth() - 28.0f), juce::Justification::centred, false);
 
-    // text block
-    auto txt = r.reduced (26.0f, 7.0f);
+    auto txt = r.reduced (28.0f, 5.0f);
+    auto top = txt.removeFromTop (txt.getHeight() * 0.42f);
 
     juce::String cat = MHSignatureAudioProcessor::getFactoryPresetCategory (proc.getCurrentPresetIndex());
     const int idx = proc.getCurrentPresetIndex() + 1;
-    juce::String top = cat + " Preset \xc2\xb7 " + juce::String (idx).paddedLeft ('0', 3);
-    if (proc.isPresetEdited()) top += "  *";
+    juce::String head = cat + "  ·  " + juce::String (idx).paddedLeft ('0', 3);
+    if (proc.isPresetEdited()) head += "  *";
 
-    g.setFont (numberFont (7.4f, 1.2f));
-    g.setColour (juce::Colour (0xff8f97a2));
-    g.drawText (top.toUpperCase(), txt.removeFromTop (txt.getHeight() * 0.45f),
-                juce::Justification::centred, false);
+    fitText (g, head.toUpperCase(), top, typeSmall, juce::Colour (0xff8f97a2),
+             juce::Justification::centred, false, 1.8f);
 
-    g.setFont (juce::Font (juce::Font::getDefaultSansSerifFontName(), 12.5f, juce::Font::plain)
-                 .withExtraKerningFactor (0.02f));
-    g.setColour (ink);
-    g.drawText (proc.getCurrentPresetName().fromFirstOccurrenceOf (" ", false, false),
-                txt, juce::Justification::centred, false);
+    fitText (g, proc.getCurrentPresetName().fromFirstOccurrenceOf (" ", false, false),
+             txt, 13.5f, ink, juce::Justification::centred, false, 0.4f);
 }
 
 void PresetBar::mouseUp (const juce::MouseEvent& e)
 {
-    if (e.position.x < 26.0f)       { proc.prevPreset(); repaint(); }
-    else if (e.position.x > (float) getWidth() - 26.0f) { proc.nextPreset(); repaint(); }
-    else                            { showBrowser(); }
+    if (e.position.x < 28.0f)                        { proc.prevPreset(); repaint(); }
+    else if (e.position.x > (float) getWidth() - 28.0f) { proc.nextPreset(); repaint(); }
+    else                                             { showBrowser(); }
 }
 
 void PresetBar::showBrowser()
@@ -645,7 +671,6 @@ void PresetBar::showBrowser()
             flush();
             lastCat = presets[(size_t) i].category;
         }
-
         sub.addItem (i + 1, presets[(size_t) i].name, true, i == proc.getCurrentPresetIndex());
     }
     flush();
@@ -660,27 +685,255 @@ void PresetBar::showBrowser()
 }
 
 //==============================================================================
-namespace
+//  Module artwork — drawn from the live parameter values, so every display is
+//  a read-out and not decoration.
+//==============================================================================
+namespace art
 {
-    float pv (MHSignatureAudioProcessor& p, const char* id)
+    void grid (juce::Graphics& g, juce::Rectangle<float> a, int cols, int rows)
     {
-        if (auto* a = p.apvts.getRawParameterValue (id))
-            return a->load();
-        return 0.0f;
+        g.setColour (juce::Colour (0x14ffffff));
+        for (int i = 1; i < cols; ++i)
+            g.drawLine (a.getX() + a.getWidth() * (float) i / (float) cols, a.getY(),
+                        a.getX() + a.getWidth() * (float) i / (float) cols, a.getBottom(), 1.0f);
+        for (int i = 1; i < rows; ++i)
+            g.drawLine (a.getX(), a.getY() + a.getHeight() * (float) i / (float) rows,
+                        a.getRight(), a.getY() + a.getHeight() * (float) i / (float) rows, 1.0f);
     }
 
-}
+    void curve (juce::Graphics& g, juce::Rectangle<float> a,
+                const std::function<float (float)>& fn, float alphaTop = 0.30f)
+    {
+        juce::Path p, fill;
+        const int n = 130;
 
-//==============================================================================
-juce::Path makeSignaturePath()
-{
-    // a single flourish stroke that sits under the wordmark
-    juce::Path p;
-    p.startNewSubPath (6.0f, 18.0f);
-    p.cubicTo (60.0f, 2.0f, 120.0f, 2.0f, 150.0f, 12.0f);
-    p.cubicTo (176.0f, 21.0f, 150.0f, 30.0f, 128.0f, 26.0f);
-    p.cubicTo (100.0f, 21.0f, 140.0f, 8.0f, 184.0f, 6.0f);
-    return p;
+        for (int i = 0; i < n; ++i)
+        {
+            const float t = (float) i / (float) (n - 1);
+            const float x = a.getX() + t * a.getWidth();
+            const float y = a.getBottom() - juce::jlimit (0.0f, 1.0f, fn (t)) * a.getHeight();
+
+            if (i == 0) { p.startNewSubPath (x, y); fill.startNewSubPath (x, a.getBottom()); }
+            p.lineTo (x, y);
+            fill.lineTo (x, y);
+        }
+
+        fill.lineTo (a.getRight(), a.getBottom());
+        fill.closeSubPath();
+
+        g.setGradientFill (juce::ColourGradient (accent.withAlpha (alphaTop), 0.0f, a.getY(),
+                                                 accent.withAlpha (0.015f), 0.0f, a.getBottom(), false));
+        g.fillPath (fill);
+
+        g.setColour (softAccent.withAlpha (0.92f));
+        g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::rounded));
+    }
+
+    void eq (MHSignatureAudioProcessor& proc, juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        const float lowG  = pv (proc, Params::eqLowG);
+        const float lmG   = pv (proc, Params::eqLmG);
+        const float hmG   = pv (proc, Params::eqHmG);
+        const float highG = pv (proc, Params::eqHighG);
+        const float tilt  = pv (proc, Params::eqTilt);
+        const float hpf   = pv (proc, Params::eqHpf);
+
+        grid (g, a, 4, 2);
+        g.setColour (juce::Colour (0x20ffffff));
+        g.drawLine (a.getX(), a.getCentreY(), a.getRight(), a.getCentreY(), 1.0f);
+
+        auto bell = [] (float f, float fc, float oct)
+        {
+            const float d = std::log2 (juce::jmax (1.0f, f) / fc) / oct;
+            return std::exp (-0.5f * d * d);
+        };
+
+        curve (g, a, [&] (float t)
+        {
+            const float f = 20.0f * std::pow (1000.0f, t);
+            float db = lowG * bell (f, 65.0f, 1.15f)
+                     + lmG  * bell (f, 152.0f, 0.85f)
+                     + hmG  * bell (f, 3500.0f, 0.95f)
+                     + highG * bell (f, 9000.0f, 1.5f)
+                     + tilt * (t - 0.5f) * 6.0f;
+
+            if (f < hpf)
+                db -= 10.0f * std::log2 (hpf / juce::jmax (20.0f, f));
+
+            return (db + 14.0f) / 28.0f;
+        });
+    }
+
+    void compressor (MHSignatureAudioProcessor& proc, juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        const float gr = proc.getGainReductionDb();
+        auto left  = a.withWidth (a.getWidth() * 0.34f).reduced (0.0f, 2.0f);
+        auto right = a.withTrimmedLeft (a.getWidth() * 0.40f).reduced (0.0f, 2.0f);
+
+        g.setColour (juce::Colour (0xff15181d));
+        g.fillRoundedRectangle (left, 3.0f);
+        g.setColour (juce::Colour (0xff1e2229));
+        g.drawRoundedRectangle (left, 3.0f, 1.0f);
+
+        const float thr = pv (proc, Params::dynThr);
+        const float ratio = juce::jmax (1.0f, pv (proc, Params::dynRatio));
+
+        juce::Path io;
+        for (int i = 0; i <= 44; ++i)
+        {
+            const float t = (float) i / 44.0f;
+            const float in = -60.0f + 60.0f * t;
+            const float out = in <= thr ? in : thr + (in - thr) / ratio;
+            const float x = left.getX() + 3.0f + t * (left.getWidth() - 6.0f);
+            const float y = left.getBottom() - 3.0f
+                          - juce::jlimit (0.0f, 1.0f, (out + 60.0f) / 60.0f) * (left.getHeight() - 6.0f);
+            if (i == 0) io.startNewSubPath (x, y); else io.lineTo (x, y);
+        }
+        g.setColour (accent.withAlpha (0.9f));
+        g.strokePath (io, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved,
+                                                juce::PathStrokeType::rounded));
+
+        fitText (g, "GAIN REDUCTION", right.withHeight (12.0f), typeSmall - 1.5f,
+                 juce::Colour (0xff78808b), juce::Justification::centredLeft, true, 1.6f);
+
+        auto bar = right.withTrimmedTop (14.0f).withHeight (juce::jmin (16.0f, right.getHeight() - 14.0f));
+        g.setColour (juce::Colour (0xff0c0e12));
+        g.fillRoundedRectangle (bar, 3.0f);
+
+        const float amount = juce::jlimit (0.0f, 1.0f, -gr / 12.0f);
+        if (amount > 0.004f)
+        {
+            g.setGradientFill (juce::ColourGradient (accent, bar.getX(), bar.getCentreY(),
+                                                     softAccent, bar.getRight(), bar.getCentreY(), false));
+            g.fillRoundedRectangle (bar.withWidth (juce::jmax (4.0f, bar.getWidth() * amount)), 3.0f);
+        }
+
+        fitText (g, gr < -0.05f ? juce::String (gr, 1) + " dB" : "0.0 dB",
+                 bar.reduced (6.0f, 0.0f), 9.5f, juce::Colour (0xfff2eee9),
+                 juce::Justification::centredRight, true, 0.4f);
+    }
+
+    void saturation (MHSignatureAudioProcessor& proc, juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        const float drive = juce::jlimit (0.0f, 1.0f, pv (proc, Params::satDrive) / 18.0f);
+
+        juce::Path p;
+        const int n = 120;
+        for (int i = 0; i < n; ++i)
+        {
+            const float t = (float) i / (float) (n - 1);
+            const float x = a.getX() + t * a.getWidth();
+            const float s = std::sin (t * juce::MathConstants<float>::twoPi * 3.0f);
+            const float y = a.getCentreY()
+                          - std::tanh (s * (1.0f + drive * 6.0f)) * a.getHeight() * 0.42f;
+            if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
+        }
+
+        g.setColour (softAccent.withAlpha (0.92f));
+        g.strokePath (p, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved,
+                                                juce::PathStrokeType::rounded));
+    }
+
+    void reverb (MHSignatureAudioProcessor& proc, juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        const float decay = juce::jlimit (0.3f, 12.0f, pv (proc, Params::revDecay));
+        const float damp = juce::jlimit (0.0f, 1.0f, pv (proc, Params::revDamp) * 0.01f);
+        const float mix = juce::jlimit (0.0f, 1.0f, pv (proc, Params::revMix) * 0.01f);
+
+        curve (g, a, [&] (float t)
+        {
+            const float e = std::exp (-t * (6.0f / decay) * (1.0f + damp * 1.4f));
+            return e * (0.35f + 0.6f * mix);
+        });
+    }
+
+    void delay (MHSignatureAudioProcessor& proc, juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        const float fb = juce::jlimit (0.0f, 1.0f, pv (proc, Params::dlyFb) * 0.01f);
+        const int cols = 9, rows = 3;
+        const float dx = a.getWidth() / (float) (cols - 1);
+        const float dy = a.getHeight() / (float) (rows + 1);
+
+        for (int c = 0; c < cols; ++c)
+        {
+            const float amp = std::pow (juce::jmax (0.02f, fb), (float) c * 0.6f);
+            for (int r = 0; r < rows; ++r)
+            {
+                const bool alt = ((c + r) % 2) == 0;
+                const float alpha = juce::jlimit (0.05f, 0.95f, amp * (alt ? 1.0f : 0.5f));
+                const float d = 2.4f + 2.2f * amp;
+                g.setColour ((alt ? accent : deepAccent).withAlpha (alpha));
+                g.fillEllipse (a.getX() + (float) c * dx - d * 0.5f,
+                               a.getY() + dy * (float) (r + 1) - d * 0.5f, d, d);
+            }
+        }
+    }
+
+    void modulation (MHSignatureAudioProcessor& proc, juce::Graphics& g, juce::Rectangle<float> a,
+                     float phase)
+    {
+        const float depth = juce::jlimit (0.0f, 1.0f, pv (proc, Params::modDepth) * 0.01f);
+        const float mix = juce::jlimit (0.0f, 1.0f, pv (proc, Params::modMix) * 0.01f);
+
+        curve (g, a, [&] (float t)
+        {
+            return 0.5f - std::sin (t * juce::MathConstants<float>::twoPi
+                                    + phase * juce::MathConstants<float>::twoPi)
+                        * 0.42f * (0.15f + 0.85f * depth) * (0.4f + 0.6f * mix);
+        }, 0.22f);
+    }
+
+    void imager (MHSignatureAudioProcessor& proc, juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        const float width = juce::jlimit (0.0f, 2.0f, pv (proc, Params::imgWidth) * 0.01f);
+        const float bal = juce::jlimit (-1.0f, 1.0f, pv (proc, Params::imgBalance) * 0.01f);
+
+        const juce::Point<float> c (a.getCentreX(), a.getBottom() - 2.0f);
+        const float r = juce::jmin (a.getWidth() * 0.46f, a.getHeight() - 4.0f);
+
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, r, r, 0.0f, juce::MathConstants<float>::pi,
+                           juce::MathConstants<float>::twoPi, true);
+        g.setColour (juce::Colour (0xff282c33));
+        g.strokePath (arc, juce::PathStrokeType (1.3f));
+
+        const float spread = juce::jlimit (0.08f, 1.0f, width * 0.5f)
+                           * juce::MathConstants<float>::halfPi;
+        const float rot = bal * 0.5f;
+
+        juce::Path petal;
+        petal.startNewSubPath (c.x, c.y);
+        petal.addCentredArc (c.x, c.y, r * 0.96f, r * 0.96f, 0.0f,
+                             -juce::MathConstants<float>::halfPi - rot - spread * 0.5f,
+                             -juce::MathConstants<float>::halfPi - rot + spread * 0.5f, true);
+        petal.closeSubPath();
+
+        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.62f), c.x, c.y,
+                                                 deepAccent.withAlpha (0.04f), c.x, c.y - r, true));
+        g.fillPath (petal);
+
+        g.setColour (accent.withAlpha (0.5f));
+        g.drawLine (c.x, c.y, c.x + std::sin (rot) * r * 0.96f,
+                    c.y - std::cos (rot) * r * 0.96f, 1.2f);
+
+        g.setColour (juce::Colour (0xff3a3f46));
+        g.drawLine (c.x, c.y, c.x - r, c.y, 1.0f);
+        g.drawLine (c.x, c.y, c.x + r, c.y, 1.0f);
+    }
+
+    void transient (MHSignatureAudioProcessor& proc, juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        const float att = juce::jlimit (-1.0f, 1.0f, pv (proc, Params::trnAtt) * 0.01f);
+        const float sus = juce::jlimit (-1.0f, 1.0f, pv (proc, Params::trnSus) * 0.01f);
+
+        curve (g, a, [&] (float t)
+        {
+            const float env = std::exp (-t * 4.0f) * (0.55f + 0.45f * att)
+                            + (1.0f - std::exp (-t * 10.0f)) * 0.25f * (1.0f + sus);
+            return env;
+        });
+    }
 }
 
 //==============================================================================
@@ -688,9 +941,11 @@ class SpectrumPanel : public ModulePanel
 {
 public:
     explicit SpectrumPanel (MHSignatureAudioProcessor& p)
-        : ModulePanel (p, juce::String(), juce::StringArray()), proc (p)
+        : ModulePanel (p, juce::String()), proc (p)
     {
         setMouseCursor (juce::MouseCursor::NormalCursor);
+
+        for (auto& v : hist) v = -90.0f;
     }
 
     void tick()
@@ -699,7 +954,7 @@ public:
         proc.getSpectrum (specPre.data(), true);
         proc.getWaveform (wave.data());
 
-        loudAccum = juce::jmax (loudAccum * 0.92f, proc.getOutputLevelDb());
+        loudAccum = juce::jmax (loudAccum * 0.93f, proc.getOutputLevelDb());
         if (++loudCounter >= 2)
         {
             loudCounter = 0;
@@ -714,38 +969,38 @@ public:
     {
         ModulePanel::paint (g);
 
-        auto body = getBodyArea();
-
-        // ---- tabs --------------------------------------------------------
-        for (int i = 0; i < 3; ++i)
+        // tabs
+        for (int i = 0; i < tabNames.size(); ++i)
         {
             auto tb = tabRect (i);
+
             if (i == mode)
             {
-                g.setColour (accent.withAlpha (0.16f));
-                g.fillRoundedRectangle (tb.expanded (3.0f, 2.0f), 9.0f);
-                g.setColour (accent);
-                g.setFont (labelFont (7.2f, 1.5f));
+                g.setColour (accent.withAlpha (0.20f));
+                g.fillRoundedRectangle (tb.expanded (4.0f, 1.0f), 8.0f);
             }
-            else
-            {
-                g.setColour (juce::Colour (0xff7d858f));
-                g.setFont (labelFont (7.2f, 1.5f));
-            }
-            g.drawText (tabNames[i], tb, juce::Justification::centred, false);
+
+            fitText (g, tabNames[i], tb, typeSmall,
+                     i == mode ? juce::Colour (0xfff6ddd6) : juce::Colour (0xff7c848e),
+                     juce::Justification::centred, true, 1.8f);
         }
 
+        // pre/post toggle
         auto chip = chipRect();
-        g.setFont (labelFont (6.8f, 1.3f));
-        g.setColour (pre ? accent : juce::Colour (0xff6f7781));
-        g.drawText ("PRE/POST", chip, juce::Justification::centredRight, false);
+        g.setColour (juce::Colour (0xff15181d));
+        g.fillRoundedRectangle (chip, 8.0f);
+        g.setColour (pre ? accent.withAlpha (0.7f) : juce::Colour (0xff2c3037));
+        g.drawRoundedRectangle (chip, 8.0f, 1.0f);
+        fitText (g, pre ? "PRE" : "POST", chip, typeSmall - 0.5f,
+                 pre ? softAccent : juce::Colour (0xff9198a2),
+                 juce::Justification::centred, true, 1.6f);
 
-        // ---- graph -------------------------------------------------------
-        auto graph = body.withTrimmedTop (26);
-        auto inner = graph.withTrimmedLeft (20).withTrimmedBottom (16);
+        // plot
+        auto plot = plotArea();
+        g.setColour (juce::Colour (0xff080a0d));
+        g.fillRoundedRectangle (plot, 5.0f);
 
-        g.setColour (juce::Colour (0xff0a0c10));
-        g.fillRoundedRectangle (graph.toFloat(), 4.0f);
+        auto inner = plot.reduced (2.0f).withTrimmedLeft (22.0f).withTrimmedBottom (16.0f);
 
         auto dbToY = [&] (float db)
         {
@@ -754,37 +1009,31 @@ public:
         };
         auto freqToX = [&] (float f)
         {
-            const float t = juce::jlimit (0.0f, 1.0f,
-                                          std::log (juce::jmax (20.0f, f) / 20.0f) / std::log (1000.0f));
+            const float t = juce::jlimit (0.0f, 1.0f, std::log (juce::jmax (20.0f, f) / 20.0f)
+                                                        / std::log (1000.0f));
             return inner.getX() + t * inner.getWidth();
         };
 
-        g.setFont (numberFont (5.8f, 0.3f));
-        for (int db = 0; db >= -60; db -= 10)
+        for (int db = 0; db >= -60; db -= 12)
         {
             const float y = dbToY ((float) db);
             g.setColour (gridCol);
             g.drawLine (inner.getX(), y, inner.getRight(), y, 1.0f);
-            g.setColour (juce::Colour (0xff5f6771));
-            g.drawText (juce::String (db), juce::Rectangle<float> (graph.getX() + 2.0f, y - 5.0f,
-                                                                  16.0f, 10.0f),
-                        juce::Justification::centredRight, false);
+            fitText (g, juce::String (db),
+                     { plot.getX() + 2.0f, y - 6.0f, 19.0f, 12.0f }, 7.5f,
+                     juce::Colour (0xff5d6570), juce::Justification::centredRight, false, 0.2f);
         }
 
-        const float freqs[] { 20.0f, 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f,
-                              5000.0f, 10000.0f, 20000.0f };
-        const char* labels[] { "20", "50", "100", "200", "500", "1k", "2k", "5k", "10k", "20k" };
+        const float freqs[]  { 20.0f, 100.0f, 500.0f, 1000.0f, 5000.0f, 10000.0f, 20000.0f };
+        const char* labels[] { "20", "100", "500", "1k", "5k", "10k", "20k" };
 
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i < 7; ++i)
         {
             const float x = freqToX (freqs[i]);
             g.setColour (gridCol);
             g.drawLine (x, inner.getY(), x, inner.getBottom(), 1.0f);
-            g.setColour (juce::Colour (0xff5f6771));
-            g.setFont (numberFont (5.6f, 0.2f));
-            g.drawText (labels[i], juce::Rectangle<float> (x - 12.0f, inner.getBottom() + 2.0f,
-                                                           24.0f, 10.0f),
-                        juce::Justification::centred, false);
+            fitText (g, labels[i], { x - 14.0f, inner.getBottom() + 1.0f, 28.0f, 12.0f }, 7.5f,
+                     juce::Colour (0xff5d6570), juce::Justification::centred, false, 0.2f);
         }
 
         if (mode == 0)
@@ -804,12 +1053,12 @@ public:
             fill.lineTo (inner.getRight(), inner.getBottom());
             fill.closeSubPath();
 
-            g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.55f), 0.0f, inner.getY(),
-                                                     accent.withAlpha (0.03f), 0.0f, inner.getBottom(), false));
+            g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.50f), 0.0f, inner.getY(),
+                                                     accent.withAlpha (0.02f), 0.0f, inner.getBottom(), false));
             g.fillPath (fill);
 
             g.setColour (softAccent.withAlpha (0.95f));
-            g.strokePath (line, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved,
+            g.strokePath (line, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved,
                                                       juce::PathStrokeType::rounded));
         }
         else if (mode == 1)
@@ -823,12 +1072,9 @@ public:
                                                      * inner.getHeight() * 0.46f;
                 if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
             }
-
             g.setColour (softAccent.withAlpha (0.9f));
-            g.strokePath (p, juce::PathStrokeType (1.1f, juce::PathStrokeType::curved,
+            g.strokePath (p, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved,
                                                    juce::PathStrokeType::rounded));
-            g.setColour (juce::Colour (0x1effffff));
-            g.drawLine (inner.getX(), inner.getCentreY(), inner.getRight(), inner.getCentreY(), 1.0f);
         }
         else
         {
@@ -842,18 +1088,18 @@ public:
                 if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
             }
             g.setColour (softAccent.withAlpha (0.9f));
-            g.strokePath (p, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved,
+            g.strokePath (p, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved,
                                                    juce::PathStrokeType::rounded));
         }
 
-        g.setColour (juce::Colour (0xff1b1e24));
-        g.drawRoundedRectangle (graph.toFloat(), 4.0f, 1.0f);
+        g.setColour (juce::Colour (0xff1a1e24));
+        g.drawRoundedRectangle (plot, 5.0f, 1.0f);
     }
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        for (int i = 0; i < 3; ++i)
-            if (tabRect (i).expanded (3.0f, 2.0f).contains (e.position))
+        for (int i = 0; i < tabNames.size(); ++i)
+            if (tabRect (i).expanded (4.0f, 1.0f).contains (e.position))
             {
                 mode = i;
                 repaint();
@@ -867,35 +1113,40 @@ public:
             return;
         }
 
-        ModulePanel::mouseUp (e);
     }
 
 private:
     juce::Rectangle<float> tabRect (int i) const
     {
-        const float widths[] { 66.0f, 74.0f, 66.0f };
-        float x = (float) getBodyArea().getX();
+        const float widths[] { 74.0f, 78.0f, 74.0f };
+        float x = (float) getBodyArea().getX() + 2.0f;
         for (int k = 0; k < i; ++k) x += widths[k];
-        return { x, (float) getBodyArea().getY() + 1.0f, widths[i], 18.0f };
+        return { x, (float) getBodyArea().getY(), widths[i], 18.0f };
     }
 
     juce::Rectangle<float> chipRect() const
     {
         auto body = getBodyArea();
-        return { (float) body.getRight() - 52.0f, (float) body.getY() + 1.0f, 52.0f, 18.0f };
+        return { (float) body.getRight() - 46.0f, (float) body.getY(), 46.0f, 18.0f };
+    }
+
+    juce::Rectangle<float> plotArea() const
+    {
+        auto body = getBodyArea();
+        body.removeFromTop (22);
+        return body.toFloat().translated (0.0f, 2.0f);
     }
 
     MHSignatureAudioProcessor& proc;
     int mode = 0;
     bool pre = false;
 
-    juce::StringArray tabNames { "SPECTRUM", "WAVEFORM", "LOUDNESS" };
+    juce::StringArray tabNames { "SPECTRUM", "WAVE", "LEVEL" };
 
     std::array<float, MHSignatureAudioProcessor::numSpectrumBands> spec {}, specPre {};
     std::array<float, MHSignatureAudioProcessor::numScopeSamples> wave {};
     std::array<float, 128> hist {};
-    int histIndex = 0;
-    int loudCounter = 0;
+    int histIndex = 0, loudCounter = 0;
     float loudAccum = -90.0f;
 };
 
@@ -906,7 +1157,6 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
 
     portrait = juce::ImageFileFormat::loadFrom (BinaryData::portrait_jpg,
                                                 (size_t) BinaryData::portrait_jpgSize);
-    signature = makeSignaturePath();
 
     // ---- meters ----------------------------------------------------------
     inMeter  = std::make_unique<LevelMeter> (proc, true);
@@ -926,10 +1176,32 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
     spectrumPanel = std::make_unique<SpectrumPanel> (proc);
     addAndMakeVisible (*spectrumPanel);
 
-    // ---- signature engine ------------------------------------------------
-    enginePanel = std::make_unique<ModulePanel> (proc, "SIGNATURE ENGINE", juce::StringArray());
-    enginePanel->centreTitle = true;
-    enginePanel->caption = "TURN IDEAS INTO SOUND";
+    // ---- SIGNATURE ENGINE ------------------------------------------------
+    enginePanel = std::make_unique<ModulePanel> (proc, "SIGNATURE ENGINE");
+    enginePanel->setCaption ("TURN IDEAS INTO SOUND", true);
+    enginePanel->customLayout = [this]
+    {
+        auto b = enginePanel->getLocalBounds();
+        auto left = b.reduced (14, 0).withTrimmedTop (40).withTrimmedBottom (12);
+        left.setWidth (juce::jmin (left.getWidth() - 210, 290));
+
+        const int colW = left.getWidth() / 2;
+        const int rowH = left.getHeight() / 2;
+
+        for (int i = 0; i < (int) engineMacros.size(); ++i)
+        {
+            const int c = i % 2, r = i / 2;
+            engineMacros[(size_t) i]->setBounds (left.getX() + c * colW,
+                                                 left.getY() + r * rowH, colW, rowH);
+        }
+
+        if (engineKnob != nullptr)
+        {
+            const int kw = juce::jmin (200, b.getWidth() - left.getWidth() - 62);
+            const int kh = b.getHeight() - 52;
+            engineKnob->setBounds (b.getWidth() - kw - 22, 36, kw, kh);
+        }
+    };
     addAndMakeVisible (*enginePanel);
 
     {
@@ -945,440 +1217,141 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
         addMacro (Params::space,     "SPACE");
         addMacro (Params::width,     "WIDTH");
 
-        engineMacros[0]->setBounds (34, 48, 80, 88);
-        engineMacros[1]->setBounds (350, 48, 80, 88);
-        engineMacros[2]->setBounds (34, 136, 80, 88);
-        engineMacros[3]->setBounds (350, 136, 80, 88);
-
         engineKnob = std::make_unique<MhKnob> (proc, Params::intensity, "INTENSITY", Fmt::pct0, true);
         enginePanel->addAndMakeVisible (*engineKnob);
-        engineKnob->setBounds (150, 40, 164, 186);
+        enginePanel->resized();
     }
 
     // ---- EQ --------------------------------------------------------------
-    eqPanel = std::make_unique<ModulePanel> (proc, "EQ",
-        juce::StringArray { Params::eqHpf, Params::eqLowF, Params::eqLowG, Params::eqLmF,
-                            Params::eqLmG, Params::eqHmF, Params::eqHmG, Params::eqHighF,
-                            Params::eqHighG, Params::eqTilt });
-    eqPanel->addDot (Params::eqOn);
-    eqPanel->addKnob (Params::eqLowG,   "LOW",   Fmt::db1);
-    eqPanel->addKnob (Params::eqLmG,    "LOMID", Fmt::db1);
-    eqPanel->addKnob (Params::eqHmG,    "HIMID", Fmt::db1);
-    eqPanel->addKnob (Params::eqHighG,  "HIGH",  Fmt::db1);
-    eqPanel->addKnob (Params::eqTilt,   "TILT",  Fmt::db1);
-    eqPanel->addKnob (Params::eqHpf,    "HPF",   Fmt::hz);
-    eqPanel->setArt (54, [this] (juce::Graphics& g, juce::Rectangle<float> a)
+    eqPanel = std::make_unique<ModulePanel> (proc, "EQ");
+    eqPanel->addPower (Params::eqOn, "EQ");
+    eqPanel->addKnob (Params::eqHpf,   "HPF",   Fmt::hz);
+    eqPanel->addKnob (Params::eqLowG,  "LOW",   Fmt::db1);
+    eqPanel->addKnob (Params::eqLmG,   "LO MID",Fmt::db1);
+    eqPanel->addKnob (Params::eqHmG,   "HI MID",Fmt::db1);
+    eqPanel->addKnob (Params::eqHighG, "HIGH",  Fmt::db1);
+    eqPanel->setArt (40, [this] (juce::Graphics& g, juce::Rectangle<float> a)
     {
-        const float lowG  = pv (proc, Params::eqLowG);
-        const float lmG   = pv (proc, Params::eqLmG);
-        const float hmG   = pv (proc, Params::eqHmG);
-        const float highG = pv (proc, Params::eqHighG);
-        const float tilt  = pv (proc, Params::eqTilt);
-        const float hpf   = pv (proc, Params::eqHpf);
-
-        g.setColour (juce::Colour (0x1affffff));
-        for (int i = 1; i < 4; ++i)
-            g.drawLine (a.getX() + a.getWidth() * (float) i * 0.25f, a.getY(),
-                        a.getX() + a.getWidth() * (float) i * 0.25f, a.getBottom(), 1.0f);
-        g.setColour (juce::Colour (0x22ffffff));
-        g.drawLine (a.getX(), a.getCentreY(), a.getRight(), a.getCentreY(), 1.0f);
-
-        juce::Path curve, fill;
-        const int n = 110;
-
-        for (int i = 0; i < n; ++i)
-        {
-            const float t = (float) i / (float) (n - 1);
-            const float f = 20.0f * std::pow (1000.0f, t);
-
-            auto bell = [] (float f, float fc, float oct)
-            {
-                const float d = std::log2 (juce::jmax (1.0f, f) / fc) / oct;
-                return std::exp (-0.5f * d * d);
-            };
-
-            float db = lowG * bell (f, 65.0f, 1.15f)
-                     + lmG  * bell (f, 152.0f, 0.85f)
-                     + hmG  * bell (f, 3500.0f, 0.95f)
-                     + highG * bell (f, 9000.0f, 1.5f)
-                     + tilt * (t - 0.5f) * 6.0f;
-
-            if (f < hpf)
-                db -= 10.0f * std::log2 (hpf / juce::jmax (20.0f, f));
-
-            const float y = a.getBottom() - juce::jlimit (0.0f, 1.0f, (db + 14.0f) / 28.0f) * a.getHeight();
-            const float x = a.getX() + t * a.getWidth();
-
-            if (i == 0) { curve.startNewSubPath (x, y); fill.startNewSubPath (x, a.getBottom()); }
-            curve.lineTo (x, y);
-            fill.lineTo (x, y);
-        }
-
-        fill.lineTo (a.getRight(), a.getBottom());
-        fill.closeSubPath();
-
-        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.30f), 0.0f, a.getY(),
-                                                 accent.withAlpha (0.02f), 0.0f, a.getBottom(), false));
-        g.fillPath (fill);
-
-        g.setColour (softAccent.withAlpha (0.9f));
-        g.strokePath (curve, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved,
-                                                   juce::PathStrokeType::rounded));
+        art::eq (proc, g, a);
     });
     addAndMakeVisible (*eqPanel);
 
-    // ---- COMPRESSOR ------------------------------------------------------
-    compPanel = std::make_unique<ModulePanel> (proc, "COMPRESSOR",
-        juce::StringArray { Params::dynThr, Params::dynRatio, Params::dynAtt, Params::dynRel,
-                            Params::dynMakeup, Params::dynMix, Params::limCeiling });
-    compPanel->addDot (Params::dynOn);
-    compPanel->addKnob (Params::dynThr,    "THRESHOLD", Fmt::db1);
-    compPanel->addKnob (Params::dynRatio,  "RATIO",     Fmt::ratio);
-    compPanel->addKnob (Params::dynAtt,    "ATTACK",    Fmt::ms);
-    compPanel->addKnob (Params::dynRel,    "RELEASE",   Fmt::ms);
-    compPanel->addKnob (Params::dynMakeup, "MAKEUP",    Fmt::db1);
-    compPanel->addKnob (Params::dynMix,    "MIX",       Fmt::pct0);
-    compPanel->setArt (54, [this] (juce::Graphics& g, juce::Rectangle<float> a)
+    // ---- DYNAMICS + LIMITER ---------------------------------------------
+    dynPanel = std::make_unique<ModulePanel> (proc, "DYNAMICS");
+    dynPanel->addPower (Params::dynOn, "COMP");
+    dynPanel->addPower (Params::limOn, "LIMIT");
+    dynPanel->addKnob (Params::dynThr,    "THRESH", Fmt::db1);
+    dynPanel->addKnob (Params::dynRatio,  "RATIO",  Fmt::ratio);
+    dynPanel->addKnob (Params::dynAtt,    "ATTACK", Fmt::ms);
+    dynPanel->addKnob (Params::dynRel,    "RELEASE",Fmt::ms);
+    dynPanel->addKnob (Params::dynMakeup, "MAKEUP", Fmt::db1);
+    dynPanel->addKnob (Params::limCeiling,"CEILING",Fmt::db1);
+    dynPanel->setArt (40, [this] (juce::Graphics& g, juce::Rectangle<float> a)
     {
-        const float gr = proc.getGainReductionDb();
-        auto left = a.withWidth (a.getWidth() * 0.30f).reduced (0.0f, 4.0f);
-        auto right = a.withTrimmedLeft (a.getWidth() * 0.36f).reduced (0.0f, 4.0f);
-
-        // transfer curve
-        g.setColour (juce::Colour (0xff1d2026));
-        g.drawRect (left, 1.0f);
-
-        juce::Path io;
-        const float thr = pv (proc, Params::dynThr);
-        const float ratio = juce::jmax (1.0f, pv (proc, Params::dynRatio));
-        for (int i = 0; i <= 40; ++i)
-        {
-            const float t = (float) i / 40.0f;
-            const float in = -60.0f + 60.0f * t;
-            const float out = in <= thr ? in : thr + (in - thr) / ratio;
-            const float x = left.getX() + t * left.getWidth();
-            const float y = left.getBottom() - juce::jlimit (0.0f, 1.0f, (out + 60.0f) / 60.0f) * left.getHeight();
-            if (i == 0) io.startNewSubPath (x, y); else io.lineTo (x, y);
-        }
-        g.setColour (accent.withAlpha (0.85f));
-        g.strokePath (io, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved,
-                                                juce::PathStrokeType::rounded));
-
-        // gain reduction bar
-        g.setFont (labelFont (6.4f, 1.4f));
-        g.setColour (juce::Colour (0xff7f8792));
-        g.drawText ("GAIN-REDUCTION", right.withHeight (9.0f), juce::Justification::centredLeft, false);
-
-        auto bar = right.withTrimmedTop (12.0f);
-        g.setColour (juce::Colour (0xff0d0f13));
-        g.fillRoundedRectangle (bar, 2.0f);
-
-        const float amount = juce::jlimit (0.0f, 1.0f, -gr / 12.0f);
-        if (amount > 0.002f)
-        {
-            g.setGradientFill (juce::ColourGradient (accent, bar.getX(), bar.getCentreY(),
-                                                     softAccent, bar.getRight(), bar.getCentreY(), false));
-            g.fillRoundedRectangle (bar.withWidth (juce::jmax (3.0f, bar.getWidth() * amount)), 2.0f);
-        }
-
-        juce::String grTxt = gr < -0.05f ? juce::String (gr, 1) + " dB" : "0.0 dB";
-        g.setFont (numberFont (8.0f, 0.6f));
-        g.setColour (ink);
-        g.drawText (grTxt, bar, juce::Justification::centredRight, false);
+        art::compressor (proc, g, a);
     });
-    addAndMakeVisible (*compPanel);
+    addAndMakeVisible (*dynPanel);
 
-    // ---- SATURATION / COLOUR --------------------------------------------
-    satPanel = std::make_unique<ModulePanel> (proc, "SATURATION",
-        juce::StringArray { Params::satDrive, Params::satTone, Params::satHf, Params::satMix });
-    satPanel->addDot (Params::satOn);
+    // ---- SATURATION · COLOR ---------------------------------------------
+    satPanel = std::make_unique<ModulePanel> (proc, "COLOR");
+    satPanel->addPower (Params::satOn, "SAT");
     satPanel->addKnob (Params::satDrive, "DRIVE", Fmt::db1);
     satPanel->addKnob (Params::satTone,  "TONE",  Fmt::pct0);
     satPanel->addKnob (Params::satMix,   "MIX",   Fmt::pct0);
-    satPanel->setArt (72, [this] (juce::Graphics& g, juce::Rectangle<float> a)
+    satPanel->customLayout = [this]
     {
-        const float drive = juce::jlimit (0.0f, 1.0f, pv (proc, Params::satDrive) / 18.0f);
-        a = a.withTrimmedTop (16.0f);
-        auto waveArea = a.withWidth (a.getWidth() * 0.58f);
-
-        juce::Path p;
-        const int n = 120;
-        for (int i = 0; i < n; ++i)
-        {
-            const float t = (float) i / (float) (n - 1);
-            const float x = waveArea.getX() + t * waveArea.getWidth();
-            const float s = std::sin (t * juce::MathConstants<float>::twoPi * 3.0f);
-            const float y = waveArea.getCentreY() - std::tanh (s * (1.0f + drive * 6.0f))
-                                                 * waveArea.getHeight() * 0.40f;
-            if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
-        }
-
-        g.setColour (softAccent.withAlpha (0.92f));
-        g.strokePath (p, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved,
-                                                juce::PathStrokeType::rounded));
-
-        // harmonic bars
-        auto bars = a.withTrimmedLeft (a.getWidth() * 0.62f).withTrimmedRight (4.0f);
-        const float heights[] { 1.0f, 0.42f + drive * 0.35f, 0.18f + drive * 0.3f };
-        g.setFont (numberFont (5.6f, 0.2f));
-
-        for (int i = 0; i < 3; ++i)
-        {
-            auto br = bars.withWidth (bars.getWidth() / 3.0f).withTrimmedLeft ((float) i * bars.getWidth() / 3.0f);
-            br = br.reduced (3.0f, 0.0f);
-            auto full = br.withTrimmedTop (10.0f).withTrimmedBottom (10.0f);
-            g.setColour (juce::Colour (0xff13161a));
-            g.fillRect (full);
-            g.setGradientFill (juce::ColourGradient (accent, full.getX(), full.getBottom(),
-                                                     deepAccent, full.getX(), full.getY(), false));
-            g.fillRect (full.withTop (full.getBottom() - full.getHeight() * juce::jlimit (0.1f, 1.0f, heights[i])));
-            g.setColour (juce::Colour (0xff6d7580));
-            g.drawText (juce::String (i + 1), br.withHeight (8.0f), juce::Justification::centred, false);
-        }
-
-
-    });
+        const auto body = satPanel->getBodyArea();
+        if (satType != nullptr)
+            satType->setBounds (body.getX(), body.getY() + 2,
+                                juce::jmin (body.getWidth(), 118), 20);
+    };
     addAndMakeVisible (*satPanel);
 
     satType = std::make_unique<ChoiceChip> (proc, Params::satType, "TYPE");
     satPanel->addAndMakeVisible (*satType);
+    satPanel->resized();
 
-    // ---- REVERB ---------------------------------------------------------
-    revPanel = std::make_unique<ModulePanel> (proc, "REVERB",
-        juce::StringArray { Params::revSize, Params::revDecay, Params::revDamp,
-                            Params::revPre, Params::revMix });
-    revPanel->addDot (Params::revOn);
-    revPanel->addKnob (Params::revDecay, "DECAY",   Fmt::sec1);
-    revPanel->addKnob (Params::revPre,   "PRE-DLY", Fmt::ms);
-    revPanel->addKnob (Params::revDamp,  "DAMP",    Fmt::pct0);
-    revPanel->addKnob (Params::revMix,   "MIX",     Fmt::pct0);
-    revPanel->setArt (66, [this] (juce::Graphics& g, juce::Rectangle<float> a)
+    // ---- VOCAL CONTROL ---------------------------------------------------
+    vocPanel = std::make_unique<ModulePanel> (proc, "VOCAL");
+    vocPanel->addPower (Params::vocOn, "VOX");
+    vocPanel->addKnob (Params::vocHpf,    "HPF",   Fmt::hz);
+    vocPanel->addKnob (Params::vocBodyG,  "BODY",  Fmt::db1);
+    vocPanel->addKnob (Params::vocDeessF, "DE-ESS",Fmt::hz);
+    vocPanel->addKnob (Params::vocPresG,  "PRES",  Fmt::db1);
+    vocPanel->addKnob (Params::vocAirG,   "AIR",   Fmt::db1);
+    addAndMakeVisible (*vocPanel);
+
+    // ---- DELAY + REVERB --------------------------------------------------
+    spacePanel = std::make_unique<ModulePanel> (proc, "DELAY · REVERB");
+    spacePanel->addPower (Params::dlyOn, "DLY");
+    spacePanel->addPower (Params::revOn, "REV");
+    spacePanel->addKnob (Params::dlyTime,  "TIME",  Fmt::ms);
+    spacePanel->addKnob (Params::dlyFb,    "FDBK",  Fmt::pct0);
+    spacePanel->addKnob (Params::dlyMix,   "DLY MIX", Fmt::pct0);
+    spacePanel->addKnob (Params::revDecay, "DECAY", Fmt::sec1);
+    spacePanel->addKnob (Params::revDamp,  "DAMP",  Fmt::pct0);
+    spacePanel->addKnob (Params::revMix,   "REV MIX", Fmt::pct0);
+    spacePanel->setArt (40, [this] (juce::Graphics& g, juce::Rectangle<float> a)
     {
-        const float decay = juce::jlimit (0.3f, 12.0f, pv (proc, Params::revDecay));
-        const float damp = juce::jlimit (0.0f, 1.0f, pv (proc, Params::revDamp) * 0.01f);
-        const float mix = juce::jlimit (0.0f, 1.0f, pv (proc, Params::revMix) * 0.01f);
-
-        juce::Path p, fill;
-        const int n = 90;
-        for (int i = 0; i < n; ++i)
-        {
-            const float t = (float) i / (float) (n - 1);
-            const float e = std::exp (-t * (6.0f / decay) * (1.0f + damp * 1.4f));
-            const float x = a.getX() + t * a.getWidth();
-            const float y = a.getBottom() - e * a.getHeight() * (0.35f + 0.6f * mix);
-            if (i == 0) { p.startNewSubPath (x, y); fill.startNewSubPath (x, a.getBottom()); }
-            p.lineTo (x, y);
-            fill.lineTo (x, y);
-        }
-        fill.lineTo (a.getRight(), a.getBottom());
-        fill.closeSubPath();
-
-        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.32f), 0.0f, a.getY(),
-                                                 accent.withAlpha (0.01f), 0.0f, a.getBottom(), false));
-        g.fillPath (fill);
-        g.setColour (softAccent.withAlpha (0.9f));
-        g.strokePath (p, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved,
-                                                juce::PathStrokeType::rounded));
+        art::delay (proc, g, a.withWidth (a.getWidth() * 0.46f));
+        art::reverb (proc, g, a.withTrimmedLeft (a.getWidth() * 0.52f));
     });
-    addAndMakeVisible (*revPanel);
+    addAndMakeVisible (*spacePanel);
 
-    // ---- DELAY ----------------------------------------------------------
-    dlyPanel = std::make_unique<ModulePanel> (proc, "DELAY",
-        juce::StringArray { Params::dlyTime, Params::dlyFb, Params::dlyFilter, Params::dlyMix });
-    dlyPanel->addDot (Params::dlyOn);
-    dlyPanel->addKnob (Params::dlyTime,   "TIME",     Fmt::ms);
-    dlyPanel->addKnob (Params::dlyFb,     "FEEDBACK", Fmt::pct0);
-    dlyPanel->addKnob (Params::dlyFilter, "FILTER",   Fmt::hz);
-    dlyPanel->addKnob (Params::dlyMix,    "MIX",      Fmt::pct0);
-    dlyPanel->setArt (66, [this] (juce::Graphics& g, juce::Rectangle<float> a)
-    {
-        const float fb = juce::jlimit (0.0f, 1.0f, pv (proc, Params::dlyFb) * 0.01f);
-        const int cols = 11, rows = 4;
-        const float dx = a.getWidth() / (float) (cols - 1);
-        const float dy = a.getHeight() / (float) (rows + 1);
-
-        for (int c = 0; c < cols; ++c)
-        {
-            const float amp = std::pow (juce::jmax (0.0f, fb), (float) c * 0.55f);
-            for (int r = 0; r < rows; ++r)
-            {
-                const bool alt = ((c + r) % 2) == 0;
-                const float alpha = juce::jlimit (0.06f, 1.0f, amp * (alt ? 1.0f : 0.55f));
-                const float d = 2.0f + 1.4f * amp;
-                g.setColour ((alt ? accent : deepAccent.withAlpha (0.9f)).withAlpha (alpha * 0.9f));
-                g.fillEllipse (a.getX() + (float) c * dx - d * 0.5f,
-                               a.getY() + dy * (float) (r + 1) - d * 0.5f, d, d);
-            }
-        }
-    });
-    addAndMakeVisible (*dlyPanel);
-
-    // ---- MODULATION -----------------------------------------------------
-    modPanel = std::make_unique<ModulePanel> (proc, "MODULATION",
-        juce::StringArray { Params::modRate, Params::modDepth, Params::modMix });
-    modPanel->addDot (Params::modOn);
-    modPanel->addKnob (Params::modRate,  "RATE",  Fmt::raw1);
-    modPanel->addKnob (Params::modDepth, "DEPTH", Fmt::pct0);
-    modPanel->addKnob (Params::modMix,   "MIX",   Fmt::pct0);
-    modPanel->setArt (66, [this] (juce::Graphics& g, juce::Rectangle<float> a)
-    {
-        const float depth = juce::jlimit (0.0f, 1.0f, pv (proc, Params::modDepth) * 0.01f);
-        const float mix = juce::jlimit (0.0f, 1.0f, pv (proc, Params::modMix) * 0.01f);
-
-        auto waveY = [&] (float t)
-        {
-            return a.getCentreY() - std::sin (t * juce::MathConstants<float>::twoPi
-                                              + lfoPhase * juce::MathConstants<float>::twoPi)
-                                     * a.getHeight() * 0.42f * (0.15f + 0.85f * depth);
-        };
-
-        juce::Path p;
-        const int n = 90;
-        for (int i = 0; i < n; ++i)
-        {
-            const float t = (float) i / (float) (n - 1);
-            const float x = a.getX() + t * a.getWidth();
-            if (i == 0) p.startNewSubPath (x, waveY (t)); else p.lineTo (x, waveY (t));
-        }
-
-        g.setColour (softAccent.withAlpha (0.55f + 0.45f * mix));
-        g.strokePath (p, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved,
-                                                juce::PathStrokeType::rounded));
-
-        g.setColour (juce::Colour (0x16ffffff));
-        g.drawLine (a.getX(), a.getCentreY(), a.getRight(), a.getCentreY(), 1.0f);
-    });
-    addAndMakeVisible (*modPanel);
-
-    // ---- STEREO IMAGER --------------------------------------------------
-    imgPanel = std::make_unique<ModulePanel> (proc, "STEREO IMAGER",
-        juce::StringArray { Params::imgWidth, Params::imgWLow, Params::imgWMid,
-                            Params::imgWHigh, Params::imgWAir, Params::imgBalance });
-    imgPanel->addDot (Params::imgOn);
+    // ---- STEREO IMAGER ---------------------------------------------------
+    imgPanel = std::make_unique<ModulePanel> (proc, "IMAGE");
+    imgPanel->addPower (Params::imgOn, "IMG");
     imgPanel->addKnob (Params::imgWidth,   "WIDTH",   Fmt::pct0);
     imgPanel->addKnob (Params::imgBalance, "BALANCE", Fmt::int0);
-    imgPanel->setArt (72, [this] (juce::Graphics& g, juce::Rectangle<float> a)
+    imgPanel->setArt (40, [this] (juce::Graphics& g, juce::Rectangle<float> a)
     {
-        const float width = juce::jlimit (0.0f, 2.0f, pv (proc, Params::imgWidth) * 0.01f);
-        const float bal = juce::jlimit (-1.0f, 1.0f, pv (proc, Params::imgBalance) * 0.01f);
-
-        auto centre = juce::Point<float> (a.getCentreX(), a.getBottom() - 4.0f);
-        const float r = juce::jmin (a.getWidth() * 0.42f, a.getHeight() - 8.0f);
-
-        juce::Path arc;
-        arc.addCentredArc (centre.x, centre.y, r, r, 0.0f, juce::MathConstants<float>::pi,
-                           juce::MathConstants<float>::twoPi, true);
-        g.setColour (juce::Colour (0xff272b31));
-        g.strokePath (arc, juce::PathStrokeType (1.2f));
-
-        // the "petal": energy spread between the channels
-        const float spread = juce::jlimit (0.05f, 1.0f, width * 0.5f) * (juce::MathConstants<float>::halfPi);
-        const float rot = bal * 0.5f;
-
-        juce::Path petal;
-        petal.startNewSubPath (centre.x, centre.y);
-        petal.addCentredArc (centre.x, centre.y, r * 0.95f, r * 0.95f, 0.0f,
-                             -juce::MathConstants<float>::halfPi - rot - spread * 0.5f,
-                             -juce::MathConstants<float>::halfPi - rot + spread * 0.5f, true);
-        petal.closeSubPath();
-
-        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.65f), centre.x, centre.y,
-                                                 deepAccent.withAlpha (0.05f),
-                                                 centre.x, centre.y - r, true));
-        g.fillPath (petal);
-
-        g.setColour (accent.withAlpha (0.55f));
-        g.drawLine (centre.x, centre.y, centre.x + std::sin (rot) * r * 0.95f,
-                    centre.y - std::cos (rot) * r * 0.95f, 1.2f);
-
-        g.setColour (juce::Colour (0xff3a3f46));
-        g.drawLine (centre.x, centre.y, centre.x - r, centre.y, 1.0f);
-        g.drawLine (centre.x, centre.y, centre.x + r, centre.y, 1.0f);
+        art::imager (proc, g, a);
     });
     addAndMakeVisible (*imgPanel);
 
-    // ---- VOCAL CONTROL --------------------------------------------------
-    vocPanel = std::make_unique<ModulePanel> (proc, "VOCAL CONTROL",
-        juce::StringArray { Params::vocHpf, Params::vocBodyG, Params::vocThr, Params::vocRatio,
-                            Params::vocDeessF, Params::vocDeessR, Params::vocPresG,
-                            Params::vocAirG, Params::vocSendRev });
-    vocPanel->addDot (Params::vocOn);
-    vocPanel->addKnob (Params::vocHpf,    "HPF",     Fmt::hz);
-    vocPanel->addKnob (Params::vocBodyG,  "BODY",    Fmt::db1);
-    vocPanel->addKnob (Params::vocThr,    "THRESH",  Fmt::db1);
-    vocPanel->addKnob (Params::vocRatio,  "RATIO",   Fmt::ratio);
-    vocPanel->addKnob (Params::vocDeessF, "DE-ESS",  Fmt::hz);
-    vocPanel->addKnob (Params::vocDeessR, "SIBIL",   Fmt::db1);
-    vocPanel->addKnob (Params::vocPresG,  "PRESENCE",Fmt::db1);
-    vocPanel->addKnob (Params::vocAirG,   "AIR",     Fmt::db1);
-    addAndMakeVisible (*vocPanel);
+    // ---- MODULATION ------------------------------------------------------
+    modPanel = std::make_unique<ModulePanel> (proc, "MODULATION");
+    modPanel->addPower (Params::modOn, "MOD");
+    modPanel->addKnob (Params::modRate,  "RATE",  Fmt::raw1);
+    modPanel->addKnob (Params::modDepth, "DEPTH", Fmt::pct0);
+    modPanel->addKnob (Params::modMix,   "MIX",   Fmt::pct0);
+    modPanel->setArt (26, [this] (juce::Graphics& g, juce::Rectangle<float> a)
+    {
+        art::modulation (proc, g, a, lfoPhase);
+    });
+    addAndMakeVisible (*modPanel);
 
-    // ---- TRANSIENT SHAPER -----------------------------------------------
-    trnPanel = std::make_unique<ModulePanel> (proc, "TRANSIENT SHAPER",
-        juce::StringArray { Params::trnAtt, Params::trnSus, Params::trnFreq });
-    trnPanel->addDot (Params::trnOn);
+    // ---- TRANSIENT -------------------------------------------------------
+    trnPanel = std::make_unique<ModulePanel> (proc, "TRANSIENT");
+    trnPanel->addPower (Params::trnOn, "TRNS");
     trnPanel->addKnob (Params::trnAtt,  "ATTACK",  Fmt::int0);
     trnPanel->addKnob (Params::trnSus,  "SUSTAIN", Fmt::int0);
     trnPanel->addKnob (Params::trnFreq, "SPLIT",   Fmt::hz);
-    trnPanel->setArt (46, [this] (juce::Graphics& g, juce::Rectangle<float> a)
+    trnPanel->setArt (26, [this] (juce::Graphics& g, juce::Rectangle<float> a)
     {
-        const float att = juce::jlimit (-1.0f, 1.0f, pv (proc, Params::trnAtt) * 0.01f);
-        const float sus = juce::jlimit (-1.0f, 1.0f, pv (proc, Params::trnSus) * 0.01f);
-
-        juce::Path p, fill;
-        const int n = 100;
-        for (int i = 0; i < n; ++i)
-        {
-            const float t = (float) i / (float) (n - 1);
-            const float env = std::exp (-t * 4.0f) * (0.55f + 0.45f * att)
-                            + (1.0f - std::exp (-t * 10.0f)) * 0.25f * (1.0f + sus);
-            const float x = a.getX() + t * a.getWidth();
-            const float y = a.getBottom() - juce::jlimit (0.0f, 1.0f, env) * a.getHeight() * 0.92f;
-            if (i == 0) { p.startNewSubPath (x, y); fill.startNewSubPath (x, a.getBottom()); }
-            p.lineTo (x, y);
-            fill.lineTo (x, y);
-        }
-        fill.lineTo (a.getRight(), a.getBottom());
-        fill.closeSubPath();
-
-        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.28f), 0.0f, a.getY(),
-                                                 accent.withAlpha (0.01f), 0.0f, a.getBottom(), false));
-        g.fillPath (fill);
-        g.setColour (softAccent.withAlpha (0.9f));
-        g.strokePath (p, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved,
-                                                juce::PathStrokeType::rounded));
+        art::transient (proc, g, a);
     });
     addAndMakeVisible (*trnPanel);
 
-    // ---- UTILITY / I-O --------------------------------------------------
-    utilPanel = std::make_unique<ModulePanel> (proc, "I/O",
-        juce::StringArray { Params::ioInput, Params::ioOutput, Params::ioMix });
-    utilPanel->addKnob (Params::ioInput,  "IN",  Fmt::db1);
-    utilPanel->addKnob (Params::ioOutput, "OUT", Fmt::db1);
-    utilPanel->addKnob (Params::ioMix,    "MIX", Fmt::pct0);
-    utilPanel->setArt (30, [this] (juce::Graphics& g, juce::Rectangle<float> a)
-    {
-        g.setFont (labelFont (6.2f, 1.2f));
-        g.setColour (juce::Colour (0xff7c848e));
-        g.drawText ("MONO", a.withTrimmedLeft (20.0f).withWidth (40.0f),
-                    juce::Justification::centredLeft, false);
-        g.drawText ("BYP", a.withTrimmedLeft (86.0f).withWidth (34.0f),
-                    juce::Justification::centredLeft, false);
-    });
-    addAndMakeVisible (*utilPanel);
+    // ---- I/O -------------------------------------------------------------
+    ioPanel = std::make_unique<ModulePanel> (proc, "I/O");
+    ioPanel->addKnob (Params::ioInput,  "INPUT",  Fmt::db1);
+    ioPanel->addKnob (Params::ioOutput, "OUTPUT", Fmt::db1);
+    ioPanel->addKnob (Params::ioMix,    "MIX",    Fmt::pct0);
+    addAndMakeVisible (*ioPanel);
 
-    monoDot = std::make_unique<MhDot> (proc, Params::ioMono, 12.0f);
-    bypassDot = std::make_unique<MhDot> (proc, Params::ioBypass, 12.0f);
-    utilPanel->addAndMakeVisible (*monoDot);
-    utilPanel->addAndMakeVisible (*bypassDot);
-
+    monoSwitch = std::make_unique<PowerSwitch> (proc, Params::ioMono, "MONO");
+    bypassSwitch = std::make_unique<PowerSwitch> (proc, Params::ioBypass, "BYPASS");
+    ioPanel->addAndMakeVisible (*monoSwitch);
+    ioPanel->addAndMakeVisible (*bypassSwitch);
+    ioPanel->customLayout = [this]
     {
-        auto art = utilPanel->getArtArea (30);
-        monoDot->setBounds (art.getX(), art.getCentreY() - 7, 14, 14);
-        bypassDot->setBounds (art.getX() + 66, art.getCentreY() - 7, 14, 14);
-        const auto satArt = satPanel->getArtArea (72);
-        satType->setBounds (satArt.getRight() - 100, satArt.getY(), 100, 16);
-    }
+        auto b = ioPanel->getBodyArea();
+        const int w = (b.getWidth() - 8) / 2;
+        monoSwitch->setBounds (b.getX(), b.getY() + 4, w, 22);
+        bypassSwitch->setBounds (b.getX() + w + 8, b.getY() + 4, w, 22);
+    };
+    ioPanel->resized();
 
     buildLayout();
     setSize (designW, designH);
@@ -1390,47 +1363,43 @@ Canvas::~Canvas() = default;
 //==============================================================================
 void Canvas::buildLayout()
 {
-    inMeter->setBounds  (14, 86, 54, 812);
-    outMeter->setBounds (1308, 86, 54, 812);
+    // far-left / far-right meters, portrait rail, then the module grid
+    inMeter->setBounds  (16, 78, 56, 780);
+    outMeter->setBounds (1368, 78, 56, 780);
 
-    tabs->setBounds (452, 20, 468, 32);
-    presetBar->setBounds (932, 16, 240, 40);
+    tabs->setBounds (532, 18, 400, 34);
+    presetBar->setBounds (948, 14, 288, 42);
 
-    enginePanel->setBounds   (448, 74, 464, 278);
-    spectrumPanel->setBounds (920, 74, 380, 278);
+    enginePanel->setBounds   (448, 78, 560, 226);
+    spectrumPanel->setBounds (1016, 78, 344, 226);
 
-    eqPanel->setBounds   (448, 360, 268, 184);
-    compPanel->setBounds (724, 360, 308, 184);
-    satPanel->setBounds  (1040, 360, 260, 184);
+    eqPanel->setBounds  (448, 314, 300, 186);
+    dynPanel->setBounds (760, 314, 372, 186);
+    satPanel->setBounds (1144, 314, 216, 186);
 
-    revPanel->setBounds (448, 552, 192, 214);
-    dlyPanel->setBounds (648, 552, 252, 214);
-    modPanel->setBounds (908, 552, 192, 214);
-    imgPanel->setBounds (1108, 552, 190, 214);
+    vocPanel->setBounds   (448, 510, 300, 186);
+    spacePanel->setBounds (760, 510, 372, 186);
+    imgPanel->setBounds   (1144, 510, 216, 186);
 
-    utilPanel->setBounds (448, 774, 150, 160);
-    vocPanel->setBounds  (606, 774, 330, 160);
-    trnPanel->setBounds  (944, 774, 354, 160);
+    modPanel->setBounds (448, 706, 260, 148);
+    trnPanel->setBounds (720, 706, 288, 148);
+    ioPanel->setBounds  (1020, 706, 340, 148);
 
     applyFocus (tabs->getIndex());
 }
 
-void Canvas::resized()
-{
-    // the canvas lives in a fixed design space; the editor scales the whole thing
-}
-
 void Canvas::applyFocus (int tab)
 {
-    eqPanel->setFocused   (tab == 0 || tab == 1);
-    compPanel->setFocused (tab == 0 || tab == 2);
-    trnPanel->setFocused  (tab == 0 || tab == 2);
-    vocPanel->setFocused  (tab == 0 || tab == 2);
-    satPanel->setFocused  (tab == 0 || tab == 3);
-    revPanel->setFocused  (tab == 0 || tab == 4);
-    dlyPanel->setFocused  (tab == 0 || tab == 4);
-    modPanel->setFocused  (tab == 0 || tab == 5);
-    imgPanel->setFocused  (tab == 0 || tab == 6);
+    auto focus = [] (ModulePanel* p, bool on) { p->setFocused (on); };
+
+    focus (eqPanel,  tab == 0 || tab == 1);
+    focus (dynPanel, tab == 0 || tab == 2);
+    focus (vocPanel, tab == 0 || tab == 2);
+    focus (trnPanel, tab == 0 || tab == 2);
+    focus (satPanel, tab == 0 || tab == 3);
+    focus (spacePanel, tab == 0 || tab == 4);
+    focus (modPanel, tab == 0 || tab == 5);
+    focus (imgPanel, tab == 0 || tab == 6);
 }
 
 void Canvas::timerCallback()
@@ -1438,18 +1407,17 @@ void Canvas::timerCallback()
     lfoPhase += 0.0065f;
     if (lfoPhase > 1.0f) lfoPhase -= 1.0f;
 
-    engineGlow = juce::jmin (1.0f, 0.15f + proc.getEngineActivity() * 1.4f);
+    engineGlow = juce::jmin (1.0f, 0.12f + proc.getEngineActivity() * 1.4f);
     if (engineKnob != nullptr) engineKnob->setAccentGlow (engineGlow);
 
     inMeter->repaint();
     outMeter->repaint();
     spectrumPanel->tick();
 
-    compPanel->repaint (compPanel->getArtArea (54));
-    modPanel->repaint (modPanel->getArtArea (66));
-    imgPanel->repaint (imgPanel->getArtArea (72));
-    dlyPanel->repaint (dlyPanel->getArtArea (66));
-
+    dynPanel->repaint (dynPanel->getArtArea());
+    modPanel->repaint (modPanel->getArtArea());
+    imgPanel->repaint (imgPanel->getArtArea());
+    spacePanel->repaint (spacePanel->getArtArea());
     presetBar->repaint();
 }
 
@@ -1459,134 +1427,131 @@ void Canvas::paint (juce::Graphics& g)
     g.fillAll (noir);
 
     // ------------------------------------------------------------- portrait
-    const juce::Rectangle<float> portraitArea (0.0f, 0.0f, 440.0f, (float) designH);
+    const juce::Rectangle<float> rail (76.0f, 74.0f, 364.0f, 784.0f);
+    const juce::Rectangle<float> photo (rail.getX(), rail.getY(), rail.getWidth(), 566.0f);
 
     if (portrait.isValid())
     {
         const float iw = (float) portrait.getWidth();
         const float ih = (float) portrait.getHeight();
-        const float s = juce::jmax (portraitArea.getWidth() / iw, portraitArea.getHeight() / ih);
+        const float s = juce::jmax (photo.getWidth() / iw, photo.getHeight() / ih);
         const float w = iw * s, h = ih * s;
-        const float x = portraitArea.getCentreX() - w * 0.5f;
-        const float y = portraitArea.getY() + 40.0f;
 
         juce::Graphics::ScopedSaveState state (g);
-        g.reduceClipRegion (portraitArea.toNearestInt());
-        g.drawImage (portrait, juce::Rectangle<float> (x, y, w, h),
+        g.reduceClipRegion (photo.toNearestInt());
+        g.drawImage (portrait, juce::Rectangle<float> (photo.getCentreX() - w * 0.5f,
+                                                       photo.getY(), w, h),
                      juce::RectanglePlacement::stretchToFit, false);
     }
     else
     {
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a1108), 0.0f, 0.0f,
-                                                 noir, 0.0f, (float) designH, false));
-        g.fillRect (portraitArea);
+                                                 noir, photo.getX(), photo.getBottom(), false));
+        g.fillRect (photo);
     }
 
-    // fades so the column melts into the interface
+    // fades so the portrait melts into the interface
     {
-        juce::ColourGradient bottom (juce::Colours::transparentBlack, 0.0f, 620.0f,
-                                     noir.withAlpha (0.96f), 0.0f, 858.0f, false);
-        g.setGradientFill (bottom);
-        g.fillRect (juce::Rectangle<float> (0.0f, 620.0f, 440.0f, 320.0f));
+        g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack, 0.0f, 430.0f,
+                                                 noir, 0.0f, 640.0f, false));
+        g.fillRect (photo.withTop (430.0f).withBottom (640.0f));
 
-        juce::ColourGradient rightEdge (juce::Colours::transparentBlack, 340.0f, 0.0f,
-                                        noir, 440.0f, 0.0f, false);
-        g.setGradientFill (rightEdge);
-        g.fillRect (juce::Rectangle<float> (340.0f, 0.0f, 100.0f, 900.0f));
+        g.setGradientFill (juce::ColourGradient (noir.withAlpha (0.92f), photo.getX(), 0.0f,
+                                                 juce::Colours::transparentBlack, photo.getX() + 54.0f,
+                                                 0.0f, false));
+        g.fillRect (photo.withWidth (54.0f));
 
-        g.setGradientFill (juce::ColourGradient (noir, 0.0f, 0.0f,
-                                                 juce::Colours::transparentBlack, 0.0f, 128.0f, false));
-        g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, 440.0f, 128.0f));
-
-        juce::ColourGradient leftEdge (noir.withAlpha (0.9f), 0.0f, 0.0f,
-                                       juce::Colours::transparentBlack, 70.0f, 0.0f, false);
-        g.setGradientFill (leftEdge);
-        g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, 70.0f, 900.0f));
+        g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack,
+                                                 photo.getRight() - 90.0f, 0.0f, noir,
+                                                 photo.getRight(), 0.0f, false));
+        g.fillRect (photo.withTrimmedLeft (photo.getWidth() - 90.0f));
     }
 
-    // vermilion bloom behind the engine panel
-    {
-        juce::ColourGradient bloom (accent.withAlpha (0.07f), 440.0f, 74.0f,
-                                    juce::Colours::transparentBlack, 780.0f, 300.0f, true);
-        g.setGradientFill (bloom);
-        g.fillRect (juce::Rectangle<float> (430.0f, 60.0f, 480.0f, 320.0f));
-    }
+    // vermilion bloom behind the engine
+    g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.06f), 448.0f, 90.0f,
+                                             juce::Colours::transparentBlack, 820.0f, 320.0f, true));
+    g.fillRect (juce::Rectangle<float> (440.0f, 70.0f, 500.0f, 340.0f));
 
     // ---------------------------------------------------------------- header
-    g.setFont (juce::Font (juce::Font::getDefaultSansSerifFontName(), 27.0f, juce::Font::plain)
-                 .withExtraKerningFactor (0.02f));
+    g.setFont (displayFont (26.0f, true, 0.4f));
     g.setColour (ink);
-    g.drawText ("MH", juce::Rectangle<float> (20.0f, 12.0f, 60.0f, 40.0f),
+    g.drawText ("MH", juce::Rectangle<float> (22.0f, 8.0f, 62.0f, 40.0f),
                 juce::Justification::centredLeft, false);
 
     g.setColour (juce::Colour (0xff2d3138));
-    g.drawLine (86.0f, 18.0f, 86.0f, 50.0f, 1.0f);
+    g.drawLine (92.0f, 16.0f, 92.0f, 48.0f, 1.0f);
 
-    g.setFont (titleFont (16.0f, 3.4f));
+    g.setFont (displayFont (17.0f, false, 3.4f));
     g.setColour (ink);
-    g.drawText ("MH SIGNATURE", juce::Rectangle<float> (102.0f, 10.0f, 330.0f, 26.0f),
+    g.drawText ("MH SIGNATURE", juce::Rectangle<float> (108.0f, 8.0f, 330.0f, 28.0f),
                 juce::Justification::centredLeft, false);
 
-    g.setFont (labelFont (7.2f, 2.8f));
+    g.setFont (uiFont (9.5f, false, 3.0f));
     g.setColour (juce::Colour (0xff8d949e));
-    g.drawText ("BY MILAD HASHEMI", juce::Rectangle<float> (104.0f, 34.0f, 260.0f, 14.0f),
+    g.drawText ("BY MILAD HASHEMI", juce::Rectangle<float> (110.0f, 34.0f, 280.0f, 14.0f),
                 juce::Justification::centredLeft, false);
 
-    g.setFont (labelFont (7.4f, 2.6f));
+    g.setFont (uiFont (9.5f, false, 3.0f));
     g.setColour (juce::Colour (0xff959ca6));
-    g.drawText ("SOUND WITH INTENTION", juce::Rectangle<float> (1178.0f, 27.0f, 182.0f, 14.0f),
+    g.drawText ("SOUND WITH INTENTION", juce::Rectangle<float> (1250.0f, 26.0f, 172.0f, 14.0f),
                 juce::Justification::centredRight, false);
 
     // ------------------------------------------------------------- signature
-    g.setFont (juce::Font (juce::Font::getDefaultSerifFontName(), 62.0f, juce::Font::italic)
-                 .withExtraKerningFactor (-0.02f));
-    g.setColour (juce::Colour (0xfff3ece6));
-    g.drawText ("Milad", juce::Rectangle<float> (40.0f, 686.0f, 360.0f, 84.0f),
+    const float railCx = rail.getCentreX();
+
+    g.setFont (juce::Font (juce::Font::getDefaultSerifFontName(), 58.0f, juce::Font::italic)
+                 .withExtraKerningFactor (0.01f));
+    g.setColour (juce::Colour (0xfff4ede7));
+    g.drawText ("Milad",
+                juce::Rectangle<float> (rail.getX(), 606.0f, rail.getWidth(), 78.0f),
                 juce::Justification::centred, false);
 
     {
-        juce::Graphics::ScopedSaveState state (g);
-        g.addTransform (juce::AffineTransform::scale (1.55f, 1.0f)
-                            .translated (62.0f, 764.0f));
-        g.setColour (accent.withAlpha (0.75f));
-        g.strokePath (signature, juce::PathStrokeType (1.1f, juce::PathStrokeType::curved,
-                                                       juce::PathStrokeType::rounded));
+        juce::Path flourish;
+        flourish.startNewSubPath (railCx - 92.0f, 690.0f);
+        flourish.cubicTo (railCx - 40.0f, 678.0f, railCx + 10.0f, 676.0f, railCx + 40.0f, 684.0f);
+        flourish.cubicTo (railCx + 62.0f, 690.0f, railCx + 46.0f, 698.0f, railCx + 24.0f, 696.0f);
+        flourish.cubicTo (railCx - 6.0f, 693.0f, railCx + 34.0f, 683.0f, railCx + 82.0f, 682.0f);
+
+        g.setColour (accent.withAlpha (0.8f));
+        g.strokePath (flourish, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved,
+                                                      juce::PathStrokeType::rounded));
     }
 
-    g.setFont (labelFont (7.8f, 2.7f));
-    g.setColour (juce::Colour (0xffcfc8c1));
-    g.drawText ("MUSIC / PEOPLE / EMOTION", juce::Rectangle<float> (24.0f, 806.0f, 392.0f, 14.0f),
+    g.setFont (uiFont (10.0f, false, 3.0f));
+    g.setColour (juce::Colour (0xffd3ccc6));
+    g.drawText ("MUSIC / PEOPLE / EMOTION", juce::Rectangle<float> (rail.getX(), 712.0f, 364.0f, 14.0f),
                 juce::Justification::centred, false);
-    g.setColour (juce::Colour (0xffb7b0aa));
-    g.drawText ("ALWAYS", juce::Rectangle<float> (24.0f, 822.0f, 392.0f, 14.0f),
+    g.setColour (juce::Colour (0xffb9b2ac));
+    g.drawText ("ALWAYS", juce::Rectangle<float> (rail.getX(), 730.0f, 364.0f, 14.0f),
                 juce::Justification::centred, false);
 
-    g.setFont (labelFont (6.6f, 2.2f));
+    g.setFont (uiFont (8.5f, false, 2.6f));
     g.setColour (juce::Colour (0xff7d858f));
-    g.drawText ("VERSION 1.0.0", juce::Rectangle<float> (22.0f, 902.0f, 200.0f, 12.0f),
+    g.drawText ("VERSION 1.0.0", juce::Rectangle<float> (rail.getX(), 812.0f, 200.0f, 14.0f),
                 juce::Justification::centredLeft, false);
 
     // ---------------------------------------------------------------- footer
     g.setColour (juce::Colour (0xff191c21));
-    g.drawLine (0.0f, 938.0f, (float) designW, 938.0f, 1.0f);
+    g.drawLine (0.0f, 862.0f, (float) designW, 862.0f, 1.0f);
 
-    g.setFont (labelFont (6.8f, 2.2f));
+    g.setFont (uiFont (8.5f, false, 2.4f));
     g.setColour (juce::Colour (0xff7d858f));
-    g.drawText ("dB", juce::Rectangle<float> (16.0f, 942.0f, 40.0f, 14.0f),
+    g.drawText ("dB", juce::Rectangle<float> (16.0f, 870.0f, 60.0f, 14.0f),
                 juce::Justification::centredLeft, false);
-    g.drawText ("dB", juce::Rectangle<float> (1320.0f, 942.0f, 40.0f, 14.0f),
+    g.drawText ("dB", juce::Rectangle<float> (1348.0f, 870.0f, 60.0f, 14.0f),
                 juce::Justification::centredRight, false);
 
-    g.setFont (labelFont (8.8f, 2.8f));
+    g.setFont (uiFont (10.0f, false, 3.0f));
     g.setColour (juce::Colour (0xffcfd5dc));
     g.drawText ("AN ALL-IN-ONE MIXING ENVIRONMENT",
-                juce::Rectangle<float> (448.0f, 942.0f, 852.0f, 14.0f),
+                juce::Rectangle<float> (420.0f, 870.0f, 912.0f, 14.0f),
                 juce::Justification::centred, false);
 
-    g.setFont (labelFont (6.8f, 2.2f));
+    g.setFont (uiFont (8.5f, false, 2.4f));
     g.setColour (juce::Colour (0xff7d858f));
     g.drawText ("DESIGNED BY MILAD HASHEMI",
-                juce::Rectangle<float> (1050.0f, 942.0f, 240.0f, 14.0f),
+                juce::Rectangle<float> (1080.0f, 870.0f, 260.0f, 14.0f),
                 juce::Justification::centredRight, false);
 }
 
@@ -1599,17 +1564,27 @@ MHSignatureAudioProcessorEditor::MHSignatureAudioProcessorEditor (MHSignatureAud
     setOpaque (true);
     addAndMakeVisible (canvas);
 
-    addAndMakeVisible (tooltips);
-    tooltips.setAlwaysOnTop (true);
-
     setResizable (true, true);
-    setResizeLimits (688, 480, 2752, 1920);
+    setResizeLimits ((int) (mhui::Canvas::designW * 0.85f), (int) (mhui::Canvas::designH * 0.85f),
+                     mhui::Canvas::designW * 2, mhui::Canvas::designH * 2);
 
     if (auto* constrainer = getConstrainer())
         constrainer->setFixedAspectRatio ((double) mhui::Canvas::designW
                                           / (double) mhui::Canvas::designH);
 
-    setSize (1100, 767);
+    // open at a size that fits the screen but keeps the type at 100 %
+    float scale = 1.0f;
+    if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+    {
+        const auto area = d->userArea;
+        scale = juce::jmin (1.0f, (float) (area.getHeight() - 60) / (float) mhui::Canvas::designH);
+        scale = juce::jmin (scale, (float) (area.getWidth() - 40) / (float) mhui::Canvas::designW);
+    }
+
+    scale = juce::jlimit (0.85f, 1.0f, scale);
+
+    setSize (juce::roundToInt ((float) mhui::Canvas::designW * scale),
+             juce::roundToInt ((float) mhui::Canvas::designH * scale));
 }
 
 MHSignatureAudioProcessorEditor::~MHSignatureAudioProcessorEditor() = default;
@@ -1626,9 +1601,9 @@ void MHSignatureAudioProcessorEditor::resized()
 
     const float w = (float) mhui::Canvas::designW * scale;
     const float h = (float) mhui::Canvas::designH * scale;
-    const float x = ((float) getWidth() - w) * 0.5f;
-    const float y = ((float) getHeight() - h) * 0.5f;
 
-    canvas.setTransform (juce::AffineTransform::scale (scale).translated (x, y));
     canvas.setBounds (0, 0, mhui::Canvas::designW, mhui::Canvas::designH);
+    canvas.setTransform (juce::AffineTransform::scale (scale)
+                             .translated (((float) getWidth() - w) * 0.5f,
+                                          ((float) getHeight() - h) * 0.5f));
 }

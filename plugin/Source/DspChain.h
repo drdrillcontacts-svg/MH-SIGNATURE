@@ -250,9 +250,10 @@ private:
 class MhChain
 {
 public:
-    void prepare (double sr, int /*blockSize*/, int /*numChannels*/)
+    void prepare (double sr, int blockSize, int /*numChannels*/)
     {
         sampleRate = sr;
+        wetBuffer.setSize (2, juce::jmax (64, blockSize), false, true, true);
         delay.prepare (sr);
         chorus.prepare (sr);
         reverb.setSampleRate (sr);
@@ -626,8 +627,11 @@ private:
 
         const float mix = juce::jlimit (0.0f, 1.0f, p.revMix * 0.01f) * amt;
 
-        // pre-delay into a scratch buffer
-        juce::AudioBuffer<float> wet (2, n);
+        // pre-delay into a scratch buffer (never reallocated while playing)
+        if (wetBuffer.getNumSamples() < n)
+            wetBuffer.setSize (2, n, false, true, true);
+
+        juce::AudioBuffer<float> wet (wetBuffer.getArrayOfWritePointers(), 2, n);
         for (int i = 0; i < n; ++i)
         {
             float a = 0.0f, b = 0.0f;
@@ -699,6 +703,18 @@ private:
         const float clipDb = p.clip * (0.5f + densAmt);
         const float rel = std::exp (-1.0f / (0.150f * (float) sampleRate));
 
+        const float ceilGain = dbToGainF (ceil);
+        const float knee = ceilGain * 0.62f;      // everything under the knee passes untouched
+        const float span = juce::jmax (1.0e-4f, ceilGain - knee);
+
+        auto softClip = [knee, span] (float x)
+        {
+            const float ax = std::abs (x);
+            if (ax <= knee) return x;
+            const float shaped = knee + span * std::tanh ((ax - knee) / span);
+            return x < 0.0f ? -shaped : shaped;
+        };
+
         float maxGr = limGr;
         for (int i = 0; i < n; ++i)
         {
@@ -716,10 +732,9 @@ private:
                 R[i] *= g;
             }
 
-            // soft clip / ceiling safety
-            const float ceilingGain = dbToGainF (ceil);
-            L[i] = std::tanh (L[i] / juce::jmax (0.05f, ceilingGain)) * ceilingGain;
-            R[i] = std::tanh (R[i] / juce::jmax (0.05f, ceilingGain)) * ceilingGain;
+            // soft clip only where it is actually needed
+            L[i] = softClip (L[i]);
+            R[i] = softClip (R[i]);
         }
         limGr = maxGr * 0.98f;
     }
@@ -738,6 +753,7 @@ private:
     Biq sideLow, sideMid, sideHigh, monoLow, sideLowHP, monoHP;
 
     Delay delay, preDelay;
+    juce::AudioBuffer<float> wetBuffer;
     ChorusLite chorus;
     juce::Reverb reverb;
 
