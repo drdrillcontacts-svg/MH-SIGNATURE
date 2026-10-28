@@ -1095,10 +1095,11 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
     satPanel->addKnob (Params::satDrive, "DRIVE", Fmt::db1);
     satPanel->addKnob (Params::satTone,  "TONE",  Fmt::pct0);
     satPanel->addKnob (Params::satMix,   "MIX",   Fmt::pct0);
-    satPanel->setArt (54, [this] (juce::Graphics& g, juce::Rectangle<float> a)
+    satPanel->setArt (72, [this] (juce::Graphics& g, juce::Rectangle<float> a)
     {
         const float drive = juce::jlimit (0.0f, 1.0f, pv (proc, Params::satDrive) / 18.0f);
-        auto waveArea = a.withWidth (a.getWidth() * 0.62f);
+        a = a.withTrimmedTop (16.0f);
+        auto waveArea = a.withWidth (a.getWidth() * 0.58f);
 
         juce::Path p;
         const int n = 120;
@@ -1117,7 +1118,7 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
                                                 juce::PathStrokeType::rounded));
 
         // harmonic bars
-        auto bars = a.withTrimmedLeft (a.getWidth() * 0.68f);
+        auto bars = a.withTrimmedLeft (a.getWidth() * 0.62f).withTrimmedRight (4.0f);
         const float heights[] { 1.0f, 0.42f + drive * 0.35f, 0.18f + drive * 0.3f };
         g.setFont (numberFont (5.6f, 0.2f));
 
@@ -1135,10 +1136,7 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
             g.drawText (juce::String (i + 1), br.withHeight (8.0f), juce::Justification::centred, false);
         }
 
-        g.setFont (labelFont (5.6f, 1.2f));
-        g.setColour (juce::Colour (0xff6d7580));
-        g.drawText ("HARMONICS", a.withTop (a.getY()).withHeight (8.0f).withTrimmedLeft (a.getWidth() * 0.68f),
-                    juce::Justification::centred, false);
+
     });
     addAndMakeVisible (*satPanel);
 
@@ -1378,8 +1376,8 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
         auto art = utilPanel->getArtArea (30);
         monoDot->setBounds (art.getX(), art.getCentreY() - 7, 14, 14);
         bypassDot->setBounds (art.getX() + 66, art.getCentreY() - 7, 14, 14);
-        satType->setBounds (satPanel->getArtArea (54).getRight() - 100, 
-                            satPanel->getArtArea (54).getY() + 6, 100, 17);
+        const auto satArt = satPanel->getArtArea (72);
+        satType->setBounds (satArt.getRight() - 100, satArt.getY(), 100, 16);
     }
 
     buildLayout();

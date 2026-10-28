@@ -402,8 +402,14 @@ void MHSignatureAudioProcessor::applyPreset (int index)
     // so switching presets never leaves a value behind from the previous one
     const auto& params = getParameters();
     for (int i = 0; i < params.size(); ++i)
+    {
         if (auto* param = params.getUnchecked (i))
+        {
+            param->beginChangeGesture();
             param->setValueNotifyingHost (param->getDefaultValue());
+            param->endChangeGesture();
+        }
+    }
 
     for (const auto& kv : p.values)
     {
