@@ -56,7 +56,7 @@ namespace
                   bool bold = false, float kerning = 1.2f)
     {
         auto font = uiFont (size, bold, kerning);
-        const float needed = juce::GlyphArrangement::getStringWidth (font, text);
+        const float needed = font.getStringWidthFloat (text);
 
         if (needed > area.getWidth() && needed > 0.0f)
             font.setHeight (juce::jmax (7.0f, size * area.getWidth() / needed));
@@ -1390,16 +1390,19 @@ void Canvas::buildLayout()
 
 void Canvas::applyFocus (int tab)
 {
-    auto focus = [] (ModulePanel* p, bool on) { p->setFocused (on); };
+    auto focus = [] (const std::unique_ptr<ModulePanel>& p, bool on)
+    {
+        if (p != nullptr) p->setFocused (on);
+    };
 
-    focus (eqPanel,  tab == 0 || tab == 1);
-    focus (dynPanel, tab == 0 || tab == 2);
-    focus (vocPanel, tab == 0 || tab == 2);
-    focus (trnPanel, tab == 0 || tab == 2);
-    focus (satPanel, tab == 0 || tab == 3);
-    focus (spacePanel, tab == 0 || tab == 4);
-    focus (modPanel, tab == 0 || tab == 5);
-    focus (imgPanel, tab == 0 || tab == 6);
+    focus (eqPanel,   tab == 0 || tab == 1);
+    focus (dynPanel,  tab == 0 || tab == 2);
+    focus (vocPanel,  tab == 0 || tab == 2);
+    focus (trnPanel,  tab == 0 || tab == 2);
+    focus (satPanel,  tab == 0 || tab == 3);
+    focus (spacePanel,tab == 0 || tab == 4);
+    focus (modPanel,  tab == 0 || tab == 5);
+    focus (imgPanel,  tab == 0 || tab == 6);
 }
 
 void Canvas::timerCallback()

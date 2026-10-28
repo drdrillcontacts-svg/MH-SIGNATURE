@@ -145,7 +145,7 @@ private:
 
 //==============================================================================
 /** Cycles a choice parameter on click. */
-class ChoiceChip : public juce::Component
+class ChoiceChip : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     ChoiceChip (MHSignatureAudioProcessor& proc, const juce::String& paramId,
@@ -200,7 +200,7 @@ private:
 };
 
 //==============================================================================
-class PresetBar : public juce::Component
+class PresetBar : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     explicit PresetBar (MHSignatureAudioProcessor& proc);
