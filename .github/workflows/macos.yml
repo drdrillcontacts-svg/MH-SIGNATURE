@@ -11,6 +11,10 @@ on:
       - 'plugin/**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 concurrency:
   group: macos-${{ github.ref }}
   cancel-in-progress: true
@@ -57,12 +61,28 @@ jobs:
           path: build/MHSignature_artefacts/Release/Standalone/MH SIGNATURE.app
           if-no-files-found: warn
 
-      - name: Upload build log
+      - name: Publish build log
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-build-log
-          path: |
-            configure.log
-            build.log
-          if-no-files-found: warn
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PLATFORM: macOS
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          python3 - <<'PYLOG' > payload.json
+          import json, os
+          parts = []
+          for f in ("configure.log", "build.log"):
+              if os.path.exists(f):
+                  parts.append(open(f, errors="replace").read())
+          log = "\n".join(parts)
+          ok = os.environ.get("JOB_STATUS") == "success"
+          log = log[-3000:] if ok else log[-52000:]
+          body = "**%s — %s** · %s\n\n```\n%s\n```" % (
+              os.environ["PLATFORM"], "OK" if ok else "FAILED",
+              os.environ["RUN_URL"], log)
+          print(json.dumps({"body": body}))
+          PYLOG
+          gh api -X POST "repos/$REPO/issues/1/comments" --input payload.json > /dev/null || true
