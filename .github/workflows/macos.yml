@@ -1,0 +1,68 @@
+name: Build MH SIGNATURE (macOS)
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'plugin/**'
+      - '.github/workflows/macos.yml'
+  pull_request:
+    paths:
+      - 'plugin/**'
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS universal (AU + VST3)
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake -S plugin -B build -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DMH_FORMATS="VST3;AU;Standalone" 2>&1 | tee configure.log
+
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build --parallel 3 2>&1 | tee build.log
+
+      - name: Show artefacts
+        run: find build/MHSignature_artefacts -maxdepth 4 | sort
+
+      - name: Upload AU + VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: MH-SIGNATURE-macOS-universal-AU-VST3
+          path: |
+            build/MHSignature_artefacts/Release/AU/MH SIGNATURE.component
+            build/MHSignature_artefacts/Release/VST3/MH SIGNATURE.vst3
+          if-no-files-found: error
+
+      - name: Upload Standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: MH-SIGNATURE-macOS-universal-Standalone
+          path: build/MHSignature_artefacts/Release/Standalone/MH SIGNATURE.app
+          if-no-files-found: warn
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build-log
+          path: |
+            configure.log
+            build.log
+          if-no-files-found: warn
