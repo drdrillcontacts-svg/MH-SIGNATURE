@@ -149,6 +149,17 @@ public:
         toneFilter[0].setCutoff (sr, toneHz); toneFilter[1].setCutoff (sr, toneHz);
     }
 
+    /** Pure delay tap, no feedback (used for reverb pre-delay). */
+    inline void tick (float l, float r, float delaySamples, float& dOutL, float& dOutR)
+    {
+        dOutL = readLine (0, delaySamples);
+        dOutR = readLine (1, delaySamples);
+
+        lines[0][(size_t) write] = l;
+        lines[1][(size_t) write] = r;
+        if (++write >= (int) lines[0].size()) write = 0;
+    }
+
     /** Writes a stereo pair and returns the delayed stereo pair. */
     inline void tick (float l, float r, float delaySamples, float fb,
                       float& dOutL, float& dOutR, bool pingPong)

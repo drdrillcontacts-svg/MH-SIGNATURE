@@ -121,7 +121,7 @@ namespace Params
                              float skew = 1.0f)
         {
             layout.add (std::make_unique<AudioParameterFloat> (
-                pid (id), name, NormalisableRange<float> (range.start, range.end, 0.0f, skew),
+                pid (id), name, NormalisableRange<float> (range.getStart(), range.getEnd(), 0.0f, skew),
                 def, AudioParameterFloatAttributes().withLabel (unit)));
         };
 

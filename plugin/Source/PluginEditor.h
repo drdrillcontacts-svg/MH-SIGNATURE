@@ -104,7 +104,7 @@ public:
     void setArt (int artHeight, std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer);
 
     void addKnob (const juce::String& id, const juce::String& label, Fmt fmt);
-    MhKnob* getKnob (int i) { return knobs[(size_t) i]; }
+    MhKnob* getKnob (int i) { return juce::isPositiveAndBelow (i, (int) knobs.size()) ? knobs[(size_t) i].get() : nullptr; }
 
     void addDot (const juce::String& id);
     MhDot* getDot() { return dot.get(); }

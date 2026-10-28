@@ -745,7 +745,7 @@ public:
         auto inner = graph.withTrimmedLeft (20).withTrimmedBottom (16);
 
         g.setColour (juce::Colour (0xff0a0c10));
-        g.fillRoundedRectangle (graph, 4.0f);
+        g.fillRoundedRectangle (graph.toFloat(), 4.0f);
 
         auto dbToY = [&] (float db)
         {
@@ -847,7 +847,7 @@ public:
         }
 
         g.setColour (juce::Colour (0xff1b1e24));
-        g.drawRoundedRectangle (graph, 4.0f, 1.0f);
+        g.drawRoundedRectangle (graph.toFloat(), 4.0f, 1.0f);
     }
 
     void mouseUp (const juce::MouseEvent& e) override
