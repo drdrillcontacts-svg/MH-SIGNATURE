@@ -206,8 +206,9 @@ def meter(d, box, level_db, side="in", ticks=True):
 def portrait(box, radius=0, fade_bottom=0.55, fade_right=0.0, tint=0.55, dim=0.92, fade_left=0.0):
     x0, y0, x1, y1 = box
     w, h = px(x1 - x0), px(y1 - y0)
-    src = Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 "..", "..", "..", "plugin", "assets", "portrait.jpg")).convert("RGB")
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = Image.open(os.path.join(here, "..", "..", "..", "assets", "brand",
+                                  "portrait-2026-vermilion.png")).convert("RGB")
     sw, sh = src.size
     scale = max(w / sw, h / sh)
     src = src.resize((int(sw * scale) + 2, int(sh * scale) + 2), Image.LANCZOS)
@@ -216,10 +217,7 @@ def portrait(box, radius=0, fade_bottom=0.55, fade_right=0.0, tint=0.55, dim=0.9
     crop = src.crop((left, top, left + w, top + h)).convert("RGB")
     arr = np.asarray(crop).astype(np.float32)
 
-    # push it towards the vermilion signature without going pink
-    arr[..., 0] = np.clip(arr[..., 0] * (1.0 + tint * 0.34), 0, 255)
-    arr[..., 1] = np.clip(arr[..., 1] * (1.0 - tint * 0.16), 0, 255)
-    arr[..., 2] = np.clip(arr[..., 2] * (1.0 - tint * 0.22), 0, 255)
+    # the source is already graded to the brand ramp; only trim exposure
     arr *= dim
 
     yy = np.linspace(0, 1, h)[:, None, None]
