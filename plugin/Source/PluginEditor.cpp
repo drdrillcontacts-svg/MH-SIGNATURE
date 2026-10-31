@@ -1479,11 +1479,6 @@ namespace modart
         }
     }
 
-    void sat (juce::Graphics& g, juce::Rectangle<float>)
-    {
-        // filled by the caller: a transfer curve inside the given band
-    }
-
     void saturationCurve (juce::Graphics& g, juce::Rectangle<float> a)
     {
         g.setColour (juce::Colour (0xff090a0c));
@@ -1706,8 +1701,9 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
         if (engineKnob != nullptr)
             engineKnob->setBounds (cx - 61, 80, 122, 140);
 
-        const int mx[4] { 45, 433, 45, 433 };
-        const int my[4] { 46, 46, 142, 142 };
+        // CHARACTER / SPACE on the top row, DENSITY / WIDTH underneath
+        const int mx[4] { 45, 45, 433, 433 };
+        const int my[4] { 46, 142, 46, 142 };
 
         for (int i = 0; i < (int) engineMacros.size() && i < 4; ++i)
             engineMacros[(size_t) i]->setBounds (mx[i], my[i], 62, 80);
@@ -2187,8 +2183,8 @@ MHSignatureAudioProcessorEditor::MHSignatureAudioProcessorEditor (MHSignatureAud
     setResizeLimits ((int) (mhui::Canvas::designW * 0.85f), (int) (mhui::Canvas::designH * 0.85f),
                      mhui::Canvas::designW * 2, mhui::Canvas::designH * 2);
 
-    if (auto* constrainer = getConstrainer())
-        constrainer->setFixedAspectRatio ((double) mhui::Canvas::designW
+    if (auto* limiter = getConstrainer())
+        limiter->setFixedAspectRatio ((double) mhui::Canvas::designW
                                           / (double) mhui::Canvas::designH);
 
     float scale = 1.0f;
