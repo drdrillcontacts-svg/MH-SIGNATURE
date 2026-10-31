@@ -91,7 +91,7 @@ def panel(box, title, key, rows=1, max_r=26.0, art=None, art_h=0.0, chip=False,
         px_ -= 0 if single else 8
 
     if readout:
-        right = x1 - 30 - (0 if n == 0 else 100)
+        right = x1 - 30 - (0 if n == 0 else 108)
         R.text(d, (right, y0 + 20), readout, 8.2, DIM, track=1.1, anchor="rm")
 
     R.dline(d, x0 + 26, y0 + 38, x1 - 26, y0 + 38, (10, 11, 13), 1.0)
@@ -155,7 +155,7 @@ def panel(box, title, key, rows=1, max_r=26.0, art=None, art_h=0.0, chip=False,
 
     for i, (lab, val, frac) in enumerate(D[key]):
         ri, ci = i // per, i % per
-        drop = max(0, slack - 4) if rows == 1 else slack // 2
+        drop = max(0, slack - 12) if rows == 1 else slack // 2
         cx = x0 + 16 + slot_w * (ci + 0.5)
         cy = y0 + top + slot_h * ri + drop + r
         labelled_dial(cx, cy, r, lab, val, frac)
@@ -237,8 +237,8 @@ def page_colour():
     R.portrait_rail(img)
     R.header(img, "COLOR")
     R.footer(img)
-    panel((212, 70, 820, 560), "SATURATION  /  COLOUR", "colour", 1, 44.0, R.art_sat, 150,
-          chip=True, readout="CONSOLE")
+    panel((212, 70, 820, 560), "SATURATION  /  COLOUR", "colour", 1, 44.0, R.art_sat, 210,
+          chip=True)
     R.analyser_plate(img, (832, 70, 1132, 560), stats=True)
     panel((212, 572, 662, 848), "VOCAL", "vocal", 1, 24.0, R.art_vo, 62, readout="DE-ESS 6.5K")
     panel((674, 572, 1132, 848), "EQ", "eq", 1, 24.0, R.art_eq, 62, readout="4 BANDS + HPF")
@@ -249,8 +249,7 @@ def page_space():
     R.portrait_rail(img)
     R.header(img, "SPACE")
     R.footer(img)
-    panel((212, 70, 666, 560), "REVERB", "reverb", 1, 38.0, R.art_decay, 190, readout="3.4 s",
-          powers=(("REVERB", True), ("DELAY", True)))
+    panel((212, 70, 666, 560), "REVERB", "reverb", 1, 38.0, R.art_decay, 190, readout="3.4 s")
     panel((678, 70, 1132, 560), "DELAY", "delay", 1, 38.0, R.art_delay, 190, readout="375 ms")
     R.analyser_plate(img, (212, 572, 1132, 848), stats=False)
     R.chain_column(img, R.RAIL, active=("REVERB", "DELAY"))
@@ -260,7 +259,7 @@ def page_mod():
     R.portrait_rail(img)
     R.header(img, "MOD")
     R.footer(img)
-    panel((212, 70, 820, 560), "MODULATION", "mod", 1, 44.0, R.art_lfo, 150, readout="0.30 Hz")
+    panel((212, 70, 820, 560), "MODULATION", "mod", 1, 44.0, R.art_lfo, 210, readout="0.30 Hz")
     R.analyser_plate(img, (832, 70, 1132, 560), stats=True)
     panel((212, 572, 662, 848), "TRANSIENT", "trns", 1, 24.0, R.art_transient, 62, readout="180 Hz")
     panel((674, 572, 1132, 848), "REVERB", "reverb", 1, 24.0, R.art_decay, 62, readout="3.4 s")

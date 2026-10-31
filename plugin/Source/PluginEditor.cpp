@@ -422,7 +422,7 @@ PowerSwitch::PowerSwitch (MHSignatureAudioProcessor& proc, const juce::String& p
     {
         // a plate that carries two processors (COMP + LIMIT, MOD + TRNS, ...)
         // throws one rocker for both of them
-        if (second != nullptr)
+        if (second != nullptr && linked)
         {
             const float v = getToggleState() ? 1.0f : 0.0f;
 
@@ -440,13 +440,21 @@ void PowerSwitch::refresh()
     if (param == nullptr) return;
 
     const bool now = param->getValue() >= 0.5f
-                       && (second == nullptr || second->getValue() >= 0.5f);
+                       && (! linked || second == nullptr || second->getValue() >= 0.5f);
 
     if (now != getToggleState())
     {
         setToggleState (now, juce::dontSendNotification);
         repaint();
     }
+}
+
+void PowerSwitch::setLinked (bool shouldLink)
+{
+    if (linked == shouldLink) return;
+
+    linked = shouldLink;
+    refresh();
 }
 
 void PowerSwitch::paintButton (juce::Graphics& g, bool over, bool)
@@ -584,6 +592,12 @@ void ModulePanel::setSections (juce::StringArray labels)
     rowsWanted = juce::jmax (1, sections.size());
     resized();
     repaint();
+}
+
+void ModulePanel::setPowerLink (bool on)
+{
+    for (auto& s2 : powers)
+        s2->setLinked (on);
 }
 
 void ModulePanel::refreshPowers()
@@ -727,7 +741,7 @@ void ModulePanel::resized()
     for (int a = 0; a < count; ++a)
     {
         const int ri = a / per, ci = a % per;
-        const int drop = rows == 1 ? juce::jmax (0, slack - 4) : slack / 2;
+        const int drop = rows == 1 ? juce::jmax (0, slack - 12) : slack / 2;
 
         knobs[(size_t) active[(size_t) a]]->setBounds (16 + ci * slotW,
                                                        top + ri * slotH + drop,
@@ -748,7 +762,7 @@ void ModulePanel::paint (juce::Graphics& g)
 
     if (readout.isNotEmpty())
     {
-        const float right = (float) getWidth() - 30.0f - (powers.empty() ? 0.0f : 100.0f);
+        const float right = (float) getWidth() - 30.0f - (powers.empty() ? 0.0f : 108.0f);
         art::text (g, readout, { right - 110.0f, 8.0f, 110.0f, 24.0f }, 8.2f, dimText,
                    juce::Justification::centredRight, false, 1.1f);
     }
@@ -1412,7 +1426,7 @@ void PresetBar::paint (juce::Graphics& g)
     g.setColour (hoverZone < 0 ? softAccent : softAccent.withAlpha (0.92f));
     g.drawText (name.toUpperCase(),
                 juce::Rectangle<float> (r.getX() + 10.0f, r.getY() + 15.0f,
-                                        r.getWidth() - 48.0f, 20.0f),
+                                        r.getWidth() - 62.0f, 20.0f),
                 juce::Justification::centredLeft, false);
 
     // step arrows
@@ -1469,10 +1483,13 @@ void PresetBar::showBrowser()
     }
     flush();
 
-    auto* bar = this;
+    juce::Component::SafePointer<PresetBar> bar (this);
+
     root.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
                         [bar] (int result)
                         {
+                            if (bar == nullptr) return;
+
                             if (result > 0) bar->proc.applyPreset (result - 1);
                             bar->repaint();
                         });
@@ -2027,6 +2044,7 @@ void Canvas::buildLayout()
         panel->setVisible (false);
         panel->setOverview (page == Page::all);
         panel->setSections ({});          // the MOTION card re-adds its two captions
+        panel->setPowerLink (false);
     }
 
     analyser->setVisible (true);
@@ -2053,6 +2071,12 @@ void Canvas::buildLayout()
     switch (page)
     {
         case Page::all:
+            // on the overview a plate that carries two processors is switched
+            // as one module; on its own page each one has its own rocker
+            dynPanel->setPowerLink (true);
+            revPanel->setPowerLink (true);
+            modPanel->setPowerLink (true);
+
             enginePanel->setBounds (212, 70, 540, 230);
             enginePanel->setVisible (true);
 
@@ -2085,6 +2109,7 @@ void Canvas::buildLayout()
             break;
 
         case Page::dyn:
+            dynPanel->setPowerLink (true);
             place (dynPanel.get(), hero,  1, 36.0f, 186.0f);
             place (trnPanel.get(), compL, 1, 24.0f,  62.0f);
             place (eqPanel.get(),  compR, 1, 24.0f,  62.0f);
@@ -2095,7 +2120,7 @@ void Canvas::buildLayout()
             break;
 
         case Page::colour:
-            place (satPanel.get(), hero,  1, 44.0f, 150.0f);
+            place (satPanel.get(), hero,  1, 44.0f, 210.0f);
             place (vocPanel.get(), compL, 1, 24.0f,  62.0f);
             place (eqPanel.get(),  compR, 1, 24.0f,  62.0f);
 
@@ -2114,7 +2139,7 @@ void Canvas::buildLayout()
             break;
 
         case Page::mod:
-            place (modPanel.get(), hero,  1, 44.0f, 150.0f);
+            place (modPanel.get(), hero,  1, 44.0f, 210.0f);
             place (trnPanel.get(), compL, 1, 24.0f,  62.0f);
             place (revPanel.get(), compR, 1, 24.0f,  62.0f);
 

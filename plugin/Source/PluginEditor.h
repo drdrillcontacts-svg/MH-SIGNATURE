@@ -127,6 +127,9 @@ public:
     /** Re-reads the parameter; called by the editor timer. */
     void refresh();
 
+    /** true = the second parameter follows this rocker (one plate, two units) */
+    void setLinked (bool shouldLink);
+
     std::function<void()> onToggle;
 
     juce::String moduleName;
@@ -134,6 +137,7 @@ public:
 private:
     juce::RangedAudioParameter* param = nullptr;
     juce::RangedAudioParameter* second = nullptr;
+    bool linked = true;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment;
     bool compactStyle = false;
 
@@ -169,6 +173,9 @@ public:
 
     bool isAnyModuleOn() const;
     void refreshPowers();
+
+    /** the plate's rocker carries a second processor with it (ALL page cards) */
+    void setPowerLink (bool on);
 
     juce::String title;
     std::function<void()> customLayout;
