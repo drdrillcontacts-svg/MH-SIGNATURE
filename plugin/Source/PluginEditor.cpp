@@ -493,7 +493,8 @@ ModulePanel::ModulePanel (MHSignatureAudioProcessor& p, const juce::String& t)
 void ModulePanel::addPower (const juce::String& paramId, const juce::String& shortName)
 {
     auto s = std::make_unique<PowerSwitch> (proc, paramId, shortName);
-    s->onToggle = [this] { repaint(); };
+    s->onToggle = [this] { refreshPowers(); repaint(); };
+
     addAndMakeVisible (*s);
     powers.push_back (std::move (s));
     resized();
@@ -502,6 +503,11 @@ void ModulePanel::addPower (const juce::String& paramId, const juce::String& sho
 void ModulePanel::addKnob (const juce::String& id, const juce::String& label, Fmt fmt)
 {
     auto k = std::make_unique<MhKnob> (proc, id, label, fmt);
+
+    // a module that starts out of the chain shows its dials dimmed
+    if (! isAnyModuleOn())
+        k->setDimmed (true);
+
     addAndMakeVisible (*k);
     knobs.push_back (std::move (k));
     resized();
@@ -537,6 +543,7 @@ void ModulePanel::setSections (juce::StringArray labels)
 
 void ModulePanel::refreshPowers()
 {
+    const bool wasLive = isAnyModuleOn();
     bool changed = false;
 
     for (auto& s2 : powers)
@@ -546,7 +553,13 @@ void ModulePanel::refreshPowers()
         changed = changed || (before != s2->getToggleState());
     }
 
-    if (changed) repaint();
+    const bool nowLive = isAnyModuleOn();
+
+    if (wasLive != nowLive)
+        for (auto& k : knobs)
+            k->setDimmed (! nowLive);
+
+    if (changed || wasLive != nowLive) repaint();
 }
 
 bool ModulePanel::isAnyModuleOn() const
