@@ -404,11 +404,7 @@ void MHSignatureAudioProcessor::applyPreset (int index)
     for (int i = 0; i < params.size(); ++i)
     {
         if (auto* param = params.getUnchecked (i))
-        {
-            param->beginChangeGesture();
             param->setValueNotifyingHost (param->getDefaultValue());
-            param->endChangeGesture();
-        }
     }
 
     for (const auto& kv : p.values)
@@ -416,9 +412,7 @@ void MHSignatureAudioProcessor::applyPreset (int index)
         if (auto* param = apvts.getParameter (kv.first))
         {
             const float v = param->getNormalisableRange().snapToLegalValue (kv.second);
-            param->beginChangeGesture();
             param->setValueNotifyingHost (param->convertTo0to1 (v));
-            param->endChangeGesture();
         }
     }
 
