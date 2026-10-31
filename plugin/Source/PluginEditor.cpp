@@ -36,6 +36,15 @@ juce::Font uiFont (float size, bool bold, float kerning)
              .withExtraKerningFactor (kerning * 0.055f);
 }
 
+float textWidth (const juce::Font& f, const juce::String& s)
+{
+   #if JUCE_MAJOR_VERSION >= 8
+    return juce::GlyphArrangement::getStringWidth (f, s);
+   #else
+    return (float) f.getStringWidth (s);
+   #endif
+}
+
 juce::Font monoFont (float size, float kerning)
 {
     return juce::Font (juce::Font::getDefaultMonospacedFontName(), size, juce::Font::plain)
@@ -71,7 +80,7 @@ namespace art
         if (str.isEmpty() || area.getWidth() < 3.0f) return;
 
         auto font = uiFont (size, bold, kerning);
-        const float need = font.getStringWidthFloat (str);
+        const float need = textWidth (font, str);
 
         if (need > area.getWidth() && need > 0.0f)
             font = uiFont (size * juce::jmax (0.55f, area.getWidth() / need), bold, kerning);
