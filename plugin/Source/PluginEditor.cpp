@@ -689,8 +689,8 @@ void ModulePanel::resized()
 
     const int count = (int) active.size();
     const int top = dialTop (chipRow ? 24.0f : 0.0f, artHeight);
-    const int boxW = juce::jmax (1, getWidth() - 32);
-    const int boxH = juce::jmax (1, getHeight() - 8 - top);
+    const int boxW = juce::jmax (40, getWidth() - 32);
+    const int boxH = juce::jmax (30, getHeight() - 8 - top);
 
     // ---- two half-height modules in one plate (MOTION) --------------------
     if (sections.size() > 0)
@@ -723,8 +723,6 @@ void ModulePanel::resized()
 
         return;
     }
-
-    if (boxH < 30 || boxW < 40) return;
 
     const int rows = juce::jmax (1, rowsWanted);
     const int per = juce::jmax (1, (count + rows - 1) / rows);
