@@ -93,6 +93,9 @@ public:
 
     void setDimmed (bool shouldDim);
 
+    /** called on every value change, so the plate can redraw its artwork */
+    std::function<void()> onEdit;
+
     juce::String knobLabel;
 
 private:
@@ -119,7 +122,6 @@ public:
                  bool compact = false);
 
     void paintButton (juce::Graphics&, bool over, bool down) override;
-    void clicked() override;
 
     /** Re-reads the parameter; called by the editor timer. */
     void refresh();
@@ -130,8 +132,8 @@ public:
 
 private:
     juce::RangedAudioParameter* param = nullptr;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment;
     bool compactStyle = false;
-    bool state = true;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PowerSwitch)
 };
@@ -145,7 +147,8 @@ public:
     ModulePanel (MHSignatureAudioProcessor& proc, const juce::String& title);
 
     void addPower (const juce::String& paramId, const juce::String& shortName);
-    void addKnob (const juce::String& id, const juce::String& label, Fmt fmt);
+    void addKnob (const juce::String& id, const juce::String& label, Fmt fmt,
+                  bool primary = true);
     void setArt (std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer);
     void setArtHeight (float h);
     void setReadout (juce::String text);
@@ -154,6 +157,9 @@ public:
     void setRows (int rows);
     void setMaxRadius (float r);
     void setSections (juce::StringArray labels);
+
+    /** true = the ALL page: only the primary dials of the module are shown */
+    void setOverview (bool on);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -175,6 +181,8 @@ private:
     std::function<void (juce::Graphics&, juce::Rectangle<float>)> artDrawer;
     juce::String readout, chipName, chipValue;
     juce::StringArray sections;
+    std::vector<bool> knobPrimary;
+    bool overview = false;
     int rowsWanted = 1;
     float maxR = 22.0f;
     float artHeight = 0.0f;
@@ -193,10 +201,14 @@ public:
     void paint (juce::Graphics&) override;
     void mouseUp (const juce::MouseEvent&) override;
 
+    /** follows the parameter; called by the editor timer */
+    void refresh();
+
 private:
     MHSignatureAudioProcessor& proc;
     juce::RangedAudioParameter* param = nullptr;
     juce::String caption;
+    juce::String shown;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChoiceChip)
 };

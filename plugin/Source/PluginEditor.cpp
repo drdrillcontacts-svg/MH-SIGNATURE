@@ -214,7 +214,8 @@ MhKnob::MhKnob (MHSignatureAudioProcessor& proc, const juce::String& paramId,
     setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     setWantsKeyboardFocus (false);
-    setMouseDragSensitivity (240);          // a full sweep needs 240 px: fine control
+    setMouseDragSensitivity (260);         // a full sweep needs 260 px: fine control
+    setVelocityBasedMode (false);
 
     if (auto* p = proc.apvts.getParameter (paramId))
     {
@@ -225,13 +226,17 @@ MhKnob::MhKnob (MHSignatureAudioProcessor& proc, const juce::String& paramId,
         setSkewFactor (range.skew, range.symmetricSkew);
         setValue (range.convertFrom0to1 (p->getValue()), juce::dontSendNotification);
         setDoubleClickReturnValue (true, range.convertFrom0to1 (p->getDefaultValue()));
-        setTooltip (p->getName (48));
+        setTooltip (p->getName (64) + "  ·  double-click to reset");
     }
 
     attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         proc.apvts, paramId, *this);
 
-    onValueChange = [this] { repaint(); };
+    onValueChange = [this]
+    {
+        repaint();
+        if (onEdit) onEdit();
+    };
 }
 
 void MhKnob::setDimmed (bool shouldDim)
@@ -246,19 +251,19 @@ void MhKnob::mouseDoubleClick (const juce::MouseEvent& e)
 {
     juce::Slider::mouseDoubleClick (e);     // the slider resets to its return value
     repaint();
+    if (onEdit) onEdit();
 }
 
 void MhKnob::paint (juce::Graphics& g)
 {
     auto b = getLocalBounds().toFloat();
-    if (b.getWidth() < 22.0f || b.getHeight() < 30.0f) return;
+    if (b.getWidth() < 24.0f || b.getHeight() < 34.0f) return;
 
-    // The block is 2r + 44 high and at least 2r + 26 wide, so this recovers the
-    // radius the module laid the dial out with.
-    const float r = juce::jlimit (8.0f, 56.0f,
-                                  juce::jmin ((b.getWidth() - 26.0f) * 0.5f,
-                                              (b.getHeight() - 44.0f) * 0.5f));
-    if (r < 7.0f) return;
+    // the block is 2r + 52 high and at least 2r + 30 wide
+    const float r = juce::jlimit (9.0f, 60.0f,
+                                  juce::jmin ((b.getWidth() - 30.0f) * 0.5f,
+                                              (b.getHeight() - 52.0f) * 0.5f));
+    if (r < 8.0f) return;
 
     const float cx = b.getCentreX();
     const float cy = b.getY() + r;
@@ -272,7 +277,7 @@ void MhKnob::paint (juce::Graphics& g)
     g.setOpacity (dimmed ? 0.42f : 1.0f);
 
     // ---- printed scale
-    if (showTicks && r >= 10.0f)
+    if (showTicks && r >= 11.0f)
     {
         const bool big = r >= 26.0f;
         const int divisions = big ? 30 : 20;
@@ -283,13 +288,13 @@ void MhKnob::paint (juce::Graphics& g)
             if (! big && ! major) continue;
 
             const float ang = a0 + sweep * (float) i / (float) divisions;
-            const float rr0 = r + 3.4f;
-            const float rr1 = r + (major ? 7.4f : 5.2f);
+            const float rr0 = r + 3.6f;
+            const float rr1 = r + (major ? 8.0f : 5.6f);
 
-            g.setColour (major ? juce::Colour (0xff848a93) : juce::Colour (0xff545a62));
+            g.setColour (major ? juce::Colour (0xff9ba2ab) : juce::Colour (0xff5c636c));
             g.drawLine (cx + std::sin (ang) * rr0, cy - std::cos (ang) * rr0,
                         cx + std::sin (ang) * rr1, cy - std::cos (ang) * rr1,
-                        major ? 0.9f : 0.7f);
+                        major ? 1.0f : 0.8f);
         }
     }
 
@@ -297,19 +302,19 @@ void MhKnob::paint (juce::Graphics& g)
     if (norm > 0.004f)
     {
         juce::Path arc;
-        arc.addCentredArc (cx, cy, r + 1.4f, r + 1.4f, 0.0f, a0, a0 + sweep * norm, true);
+        arc.addCentredArc (cx, cy, r + 1.6f, r + 1.6f, 0.0f, a0, a0 + sweep * norm, true);
 
         g.setColour (accent.withAlpha (hovered ? 0.22f : 0.13f));
         g.strokePath (arc, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved));
         g.setColour (hovered ? softAccent : accent);
-        g.strokePath (arc, juce::PathStrokeType (1.9f, juce::PathStrokeType::curved));
+        g.strokePath (arc, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved));
     }
 
     // ---- knurled skirt
     const juce::Rectangle<float> skirt (cx - r, cy - r, r * 2.0f, r * 2.0f);
     g.setColour (juce::Colour (0xff111216));
     g.fillEllipse (skirt);
-    g.setColour (juce::Colour (0xff383d45));
+    g.setColour (juce::Colour (0xff3d434b));
     g.drawEllipse (skirt.reduced (0.5f), 1.0f);
 
     {
@@ -318,7 +323,7 @@ void MhKnob::paint (juce::Graphics& g)
         for (int i = 0; i < n; ++i)
         {
             const float ang = a0 + sweep * (float) i / (float) (n - 1);
-            g.setColour ((i % 2) == 0 ? juce::Colour (0xff40454d) : juce::Colour (0xff1a1c21));
+            g.setColour ((i % 2) == 0 ? juce::Colour (0xff454b53) : juce::Colour (0xff1a1c21));
             g.drawLine (cx + std::sin (ang) * (r - 1.2f), cy - std::cos (ang) * (r - 1.2f),
                         cx + std::sin (ang) * (r * 0.80f), cy - std::cos (ang) * (r * 0.80f),
                         0.7f);
@@ -354,10 +359,10 @@ void MhKnob::paint (juce::Graphics& g)
                                         cy - std::cos (ang) * cap * 0.18f);
 
         g.setColour (juce::Colour (0xff16181c));
-        g.drawLine (inner.x, inner.y, tip.x, tip.y, juce::jmax (1.6f, r * 0.085f));
+        g.drawLine (inner.x, inner.y, tip.x, tip.y, juce::jmax (1.8f, r * 0.085f));
         g.setColour (juce::Colour (0xfffafafc));
         g.drawLine (inner.x + 0.4f, inner.y - 0.4f, tip.x, tip.y,
-                    juce::jmax (0.8f, r * 0.045f));
+                    juce::jmax (1.0f, r * 0.045f));
     }
 
     g.setColour (juce::Colour (0xff1c1f24));
@@ -366,23 +371,26 @@ void MhKnob::paint (juce::Graphics& g)
     if (noText) { g.setOpacity (1.0f); return; }
 
     // ---- printed name, then the digital value window
-    const float labelSize = juce::jmin (7.6f, r * 0.44f);
-    const float valueSize = juce::jmin (7.0f, r * 0.40f);
+    const float labelSize = juce::jlimit (8.0f, 11.0f, r * 0.30f);
+    const float valueSize = juce::jlimit (7.4f, 10.0f, r * 0.26f);
 
     if (knobLabel.isNotEmpty())
-        art::text (g, knobLabel, { b.getX() + 1.0f, cy + r + 13.0f, b.getWidth() - 2.0f, 14.0f },
-                   labelSize, ink2, juce::Justification::centred, false, 1.5f);
+        art::text (g, knobLabel, { b.getX(), cy + r + 8.0f, b.getWidth(), 14.0f },
+                   labelSize, ink2, juce::Justification::centred, false, 1.4f);
 
-    const juce::String valueText = formatValue ((float) value, fmt);
-    const float capW = r >= 40.0f ? 56.0f : 34.0f;
-    const float textW = juce::jlimit (24.0f, juce::jmax (26.0f, b.getWidth()),
-                                      juce::jmax (juce::jmin (capW, r * 1.5f + 12.0f),
-                                                  (float) valueText.length() * (valueSize * 0.62f) + 10.0f));
+    const juce::String valueText = (float) value >= -0.049f && (float) value <= 0.049f
+                                       && fmt == Fmt::db1 ? juce::String ("0.0 dB")
+                                                          : formatValue ((float) value, fmt);
+
+    const float capW = r >= 40.0f ? 62.0f : 42.0f;
+    const float textW = juce::jlimit (30.0f, juce::jmax (30.0f, b.getWidth()),
+                                      juce::jmax (juce::jmin (capW, r * 1.6f + 14.0f),
+                                                  (float) valueText.length() * (valueSize * 0.62f) + 12.0f));
 
     const float boxY = cy + r + 25.0f;
 
-    if (boxY + 16.0f <= b.getBottom() + 1.5f)
-        art::ledBox (g, { cx - textW * 0.5f, boxY, textW, 16.0f }, valueText, valueSize);
+    if (boxY + 18.0f <= b.getBottom() + 1.5f)
+        art::ledBox (g, { cx - textW * 0.5f, boxY, textW, 18.0f }, valueText, valueSize);
 
     g.setOpacity (1.0f);
 }
@@ -392,35 +400,23 @@ PowerSwitch::PowerSwitch (MHSignatureAudioProcessor& proc, const juce::String& p
                           const juce::String& shortName, bool compact)
     : juce::Button (paramId), moduleName (shortName), compactStyle (compact)
 {
-    if (auto* p = proc.apvts.getParameter (paramId))
-    {
-        param = p;
-        state = p->getValue() >= 0.5f;
-    }
+    param = proc.apvts.getParameter (paramId);
 
-    setClickingTogglesState (false);        // we drive the parameter ourselves
+    // The button toggles itself and the attachment writes the parameter; the
+    // attachment also pushes the parameter back into the button when a preset
+    // or an automation lane changes it.
+    setClickingTogglesState (true);
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     setTooltip (shortName + ": click to take this module in or out of the chain");
-}
 
-void PowerSwitch::clicked()
-{
-    if (param != nullptr)
+    attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        proc.apvts, paramId, *this);
+
+    onStateChange = [this]
     {
-        const bool next = ! (param->getValue() >= 0.5f);
-        param->setValueNotifyingHost (next ? 1.0f : 0.0f);
-        state = next;
-    }
-    else
-    {
-        state = ! state;
-    }
-
-    setToggleState (state, juce::dontSendNotification);
-    repaint();
-
-    if (onToggle)
-        onToggle();
+        repaint();
+        if (onToggle) onToggle();
+    };
 }
 
 void PowerSwitch::refresh()
@@ -428,10 +424,10 @@ void PowerSwitch::refresh()
     if (param == nullptr) return;
 
     const bool now = param->getValue() >= 0.5f;
-    if (now != state)
+
+    if (now != getToggleState())
     {
-        state = now;
-        setToggleState (state, juce::dontSendNotification);
+        setToggleState (now, juce::dontSendNotification);
         repaint();
     }
 }
@@ -440,6 +436,7 @@ void PowerSwitch::paintButton (juce::Graphics& g, bool over, bool)
 {
     auto area = getLocalBounds().toFloat();
 
+    const bool on = getToggleState();
     juce::Rectangle<float> slot = area;
     juce::Rectangle<float> lamp;
     const bool tight = compactStyle || area.getWidth() < 60.0f;
@@ -454,22 +451,20 @@ void PowerSwitch::paintButton (juce::Graphics& g, bool over, bool)
     }
     else
     {
-        slot = area.withWidth (juce::jmin (area.getWidth(), 44.0f));
-        lamp = area.withTrimmedLeft (slot.getWidth() + 6.0f).withWidth (8.0f)
-                   .withHeight (8.0f).withCentre ({ slot.getRight() + 10.0f,
-                                                    area.getCentreY() });
+        slot = area.withWidth (juce::jmin (area.getWidth(), 46.0f));
+        lamp = { slot.getRight() + 10.0f, area.getCentreY() - 4.0f, 8.0f, 8.0f };
     }
 
-    art::rocker (g, slot, state, over);
+    art::rocker (g, slot, on, over);
 
     const auto lc = lamp.getCentre();
-    const float lr = tight ? 3.0f : 3.4f;
+    const float lr = tight ? 3.0f : 3.6f;
 
-    if (state)
+    if (on)
     {
         g.setColour (deepAccent.withAlpha (0.75f));
-        g.fillEllipse (lc.x - lr - 2.2f, lc.y - lr - 2.2f, (lr + 2.2f) * 2.0f,
-                       (lr + 2.2f) * 2.0f);
+        g.fillEllipse (lc.x - lr - 2.4f, lc.y - lr - 2.4f, (lr + 2.4f) * 2.0f,
+                       (lr + 2.4f) * 2.0f);
         g.setColour (accent);
         g.fillEllipse (lc.x - lr, lc.y - lr, lr * 2.0f, lr * 2.0f);
         g.setColour (softAccent);
@@ -485,9 +480,9 @@ void PowerSwitch::paintButton (juce::Graphics& g, bool over, bool)
 
     if (! tight)
     {
-        art::text (g, state ? "ON" : "OFF",
-                   area.withTrimmedLeft (lamp.getRight() + 3.0f).withWidth (30.0f),
-                   6.6f, state ? softAccent : dimText, juce::Justification::centredLeft,
+        art::text (g, on ? "ON" : "OFF",
+                   area.withTrimmedLeft (lamp.getRight() + 4.0f).withWidth (32.0f),
+                   8.2f, on ? softAccent : dimText, juce::Justification::centredLeft,
                    false, 1.2f);
     }
 }
@@ -509,7 +504,8 @@ void ModulePanel::addPower (const juce::String& paramId, const juce::String& sho
     resized();
 }
 
-void ModulePanel::addKnob (const juce::String& id, const juce::String& label, Fmt fmt)
+void ModulePanel::addKnob (const juce::String& id, const juce::String& label, Fmt fmt,
+                           bool primary)
 {
     auto k = std::make_unique<MhKnob> (proc, id, label, fmt);
 
@@ -517,9 +513,39 @@ void ModulePanel::addKnob (const juce::String& id, const juce::String& label, Fm
     if (! isAnyModuleOn())
         k->setDimmed (true);
 
+    k->onEdit = [this]
+    {
+        // the artwork is drawn from the parameter values, so it has to be
+        // refreshed the moment a dial moves
+        auto band = artBand();
+
+        if (band.getHeight() > 4)
+            repaint (band.expanded (2));
+        else
+            repaint();
+    };
+
     addAndMakeVisible (*k);
+
+    if (overview && ! primary)
+        k->setVisible (false);
+
     knobs.push_back (std::move (k));
+    knobPrimary.push_back (primary);
     resized();
+}
+
+void ModulePanel::setOverview (bool on)
+{
+    if (overview == on) return;
+
+    overview = on;
+
+    for (int i = 0; i < (int) knobs.size(); ++i)
+        knobs[(size_t) i]->setVisible (! overview || knobPrimary[(size_t) i]);
+
+    resized();
+    repaint();
 }
 
 void ModulePanel::setArt (std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer)
@@ -584,7 +610,7 @@ namespace
     /** the top of the dial block, after the chip row and the artwork band */
     inline int dialTop (float chipRowHeight, float art)
     {
-        int top = 46;
+        int top = 48;
         if (chipRowHeight > 0.0f) top += (int) chipRowHeight;
         if (art > 0.0f)           top += (int) art + 12;
         return top;
@@ -593,14 +619,14 @@ namespace
 
 juce::Rectangle<int> ModulePanel::dialBox() const
 {
-    const int top = dialTop (chipRow ? 26.0f : 0.0f, artHeight);
+    const int top = dialTop (chipRow ? 24.0f : 0.0f, artHeight);
     return { 16, top, juce::jmax (0, getWidth() - 32),
              juce::jmax (0, getHeight() - 8 - top) };
 }
 
 juce::Rectangle<int> ModulePanel::artBand() const
 {
-    const int top = 46 + (chipRow ? 26 : 0);
+    const int top = 48 + (chipRow ? 24 : 0);
 
     if (artHeight < 4.0f) return {};
 
@@ -627,28 +653,39 @@ void ModulePanel::resized()
 
     if (knobs.empty()) return;
 
+    // the dials that are actually on screen
+    std::vector<int> active;
+
+    for (int i = 0; i < (int) knobs.size(); ++i)
+        if (knobs[(size_t) i]->isVisible())
+            active.push_back (i);
+
+    if (active.empty()) return;
+
     // ---- two half-height modules in one plate (MOTION)
     if (sections.size() > 0)
     {
         const int secs = sections.size();
-        const int top = 46;
+        const int top = 48;
         const int rowH = juce::jmax (1, (getHeight() - 8 - top) / secs);
-        const int perSec = ((int) knobs.size() + secs - 1) / secs;
+        const int total = (int) active.size();
+        const int perSec = (total + secs - 1) / secs;
 
-        for (int i = 0; i < (int) knobs.size(); ++i)
+        for (int a = 0; a < total; ++a)
         {
-            const int sec = i / perSec;
-            const int ci = i % perSec;
-            const int count = juce::jmin (perSec, (int) knobs.size() - sec * perSec);
+            const int i = active[(size_t) a];
+            const int sec = a / perSec;
+            const int ci = a % perSec;
+            const int count = juce::jmin (perSec, total - sec * perSec);
 
             const int slotW = juce::jmax (1, (getWidth() - 32) / juce::jmax (1, count));
             const int boxH = juce::jmax (1, rowH - 18);
 
-            const float r = juce::jlimit (8.0f, 56.0f,
-                                          juce::jmin ((float) (slotW - 26) * 0.5f,
-                                                      (float) (boxH - 56) * 0.5f, maxR));
-            const int rr = (int) std::round (r);
-            const int blockH = 2 * rr + 44;
+            const float r = juce::jlimit (9.0f, 60.0f,
+                                          juce::jmin ((float) (slotW - 30) * 0.5f,
+                                                      (float) (boxH - 52) * 0.5f, maxR));
+            const int rr = (int) std::floor (r);
+            const int blockH = juce::jmin (2 * rr + 52, boxH);
 
             knobs[(size_t) i]->setBounds (16 + ci * slotW,
                                           top + rowH * sec + 16 + (boxH - blockH) / 2,
@@ -661,24 +698,30 @@ void ModulePanel::resized()
     const auto box = dialBox();
     if (box.getHeight() < 30 || box.getWidth() < 40) return;
 
-    const int count = (int) knobs.size();
+    const int count = (int) active.size();
     const int rows = juce::jmax (1, rowsWanted);
+
+    if (count > 0 && rows > 1 && box.getHeight() / rows < 60) return;
     const int perRow = (count + rows - 1) / rows;
     const int slotW = box.getWidth() / juce::jmax (1, perRow);
     const int slotH = box.getHeight() / rows;
 
-    const float r = juce::jlimit (8.0f, 56.0f,
-                                  juce::jmin ((float) (slotW - 26) * 0.5f,
-                                              (float) (slotH - 56) * 0.5f, maxR));
-    const int rr = (int) std::round (r);
-    const int blockH = 2 * rr + 44;
+    const float r = juce::jlimit (9.0f, 60.0f,
+                                  juce::jmin ((float) (slotW - 30) * 0.5f,
+                                              (float) (slotH - 52) * 0.5f, maxR));
+    const int rr = (int) std::floor (r);
+    const int blockH = juce::jmin (2 * rr + 52, slotH);
 
-    for (int i = 0; i < count; ++i)
+    const int slack = juce::jmax (0, slotH - blockH);
+
+    for (int a = 0; a < count; ++a)
     {
-        const int ri = i / perRow, ci = i % perRow;
-        knobs[(size_t) i]->setBounds (box.getX() + ci * slotW,
-                                      box.getY() + ri * slotH + (slotH - blockH) / 2,
-                                      slotW, blockH);
+        const int ri = a / perRow, ci = a % perRow;
+        const int drop = rows == 1 ? juce::jmax (0, slack - 4) : slack / 2;
+
+        knobs[(size_t) active[(size_t) a]]->setBounds (box.getX() + ci * slotW,
+                                                       box.getY() + ri * slotH + drop,
+                                                       slotW, blockH);
     }
 }
 
@@ -690,26 +733,26 @@ void ModulePanel::paint (juce::Graphics& g)
     art::plate (g, r);
     art::screws (g, r);
 
-    art::text (g, title.toUpperCase(), { 30.0f, 9.0f, (float) getWidth() - 40.0f, 22.0f },
-               9.4f, live ? ink : muted, juce::Justification::centredLeft, false, 2.4f);
+    art::text (g, title.toUpperCase(), { 30.0f, 8.0f, (float) getWidth() - 40.0f, 24.0f },
+               11.0f, live ? ink : muted, juce::Justification::centredLeft, false, 2.2f);
 
     if (readout.isNotEmpty())
     {
         const float right = (float) getWidth() - 30.0f
                               - (powers.empty() ? 0.0f : (powers.size() == 1 ? 90.0f : 100.0f));
-        art::text (g, readout, { right - 100.0f, 9.0f, 100.0f, 22.0f }, 6.8f, dimText,
-                   juce::Justification::centredRight, false, 1.2f);
+        art::text (g, readout, { right - 110.0f, 8.0f, 110.0f, 24.0f }, 8.2f, dimText,
+                   juce::Justification::centredRight, false, 1.1f);
     }
 
     g.setColour (juce::Colour (0xff0a0b0d));
-    g.drawLine (26.0f, 36.0f, (float) getWidth() - 26.0f, 36.0f, 1.0f);
+    g.drawLine (26.0f, 38.0f, (float) getWidth() - 26.0f, 38.0f, 1.0f);
     g.setColour (juce::Colour (0xff2c3036));
-    g.drawLine (26.0f, 37.0f, (float) getWidth() - 26.0f, 37.0f, 0.8f);
+    g.drawLine (26.0f, 39.0f, (float) getWidth() - 26.0f, 39.0f, 0.8f);
 
     // a chip drawn by the panel itself (the COLOUR card uses a live ChoiceChip instead)
     if (chipName.isNotEmpty() && ! chipRow)
     {
-        const juce::Rectangle<float> chip (26.0f, 46.0f,
+        const juce::Rectangle<float> chip (26.0f, 48.0f,
                                            (float) juce::jmin (getWidth() - 52, 132), 18.0f);
         art::ledBox (g, chip, chipValue, 6.6f);
         art::text (g, chipName, chip.withTrimmedRight (10.0f), 5.8f, dimText,
@@ -719,13 +762,13 @@ void ModulePanel::paint (juce::Graphics& g)
     // ---- section captions (the MOTION card is two half-height modules)
     if (sections.size() > 0)
     {
-        const int top = 46;
+        const int top = 48;
         const int rowH = juce::jmax (1, (getHeight() - 8 - top) / juce::jmax (1, sections.size()));
 
         for (int i = 0; i < sections.size(); ++i)
         {
-            art::text (g, sections[i], { 30.0f, (float) (top + rowH * i + 1.0f), 200.0f, 14.0f },
-                       6.2f, dimText, juce::Justification::centredLeft, false, 2.2f);
+            art::text (g, sections[i], { 30.0f, (float) (top + rowH * i), 200.0f, 16.0f },
+                       8.0f, dimText, juce::Justification::centredLeft, false, 2.2f);
 
             if (i > 0)
             {
@@ -758,6 +801,19 @@ ChoiceChip::ChoiceChip (MHSignatureAudioProcessor& p, const juce::String& paramI
     param = proc.apvts.getParameter (paramId);
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     setTooltip ("Click to step through the saturation characters");
+}
+
+void ChoiceChip::refresh()
+{
+    if (param == nullptr) return;
+
+    const auto now = param->getCurrentValueAsText();
+
+    if (now != shown)
+    {
+        shown = now;
+        repaint();
+    }
 }
 
 void ChoiceChip::paint (juce::Graphics& g)
@@ -849,13 +905,13 @@ void AnalyserPanel::paint (juce::Graphics& g)
     art::plate (g, r);
     art::screws (g, r);
 
-    art::text (g, "ANALYSER", { 30.0f, 6.0f, 100.0f, 22.0f }, 9.0f, ink,
+    art::text (g, "ANALYSER", { 30.0f, 4.0f, 100.0f, 24.0f }, 10.4f, ink,
                juce::Justification::centredLeft, false, 2.8f);
 
     for (int i = 0; i < tabNames.size(); ++i)
     {
         auto tb = tabRect (i);
-        art::text (g, tabNames[i], tb, 6.2f, i == mode ? ink2 : dimText,
+        art::text (g, tabNames[i], tb, 7.8f, i == mode ? ink2 : dimText,
                    juce::Justification::centredLeft, false, 1.5f);
 
         if (i == mode)
@@ -876,7 +932,7 @@ void AnalyserPanel::paint (juce::Graphics& g)
         g.fillEllipse (preChip);
         g.setColour (pre ? accent : juce::Colour (0xff4a5058));
         g.drawEllipse (preChip, 1.0f);
-        art::text (g, "PRE", { preChip.getRight() + 4.0f, 9.0f, 26.0f, 14.0f }, 6.0f,
+        art::text (g, "PRE", { preChip.getRight() + 4.0f, 7.0f, 28.0f, 16.0f }, 7.2f,
                    pre ? ink2 : dimText, juce::Justification::centredLeft, false, 1.4f);
 
         auto postChip = chipRect (1);
@@ -886,7 +942,7 @@ void AnalyserPanel::paint (juce::Graphics& g)
         g.fillEllipse (postChip);
         g.setColour (! pre ? accent : juce::Colour (0xff4a5058));
         g.drawEllipse (postChip, 1.0f);
-        art::text (g, "POST", { postChip.getRight() + 4.0f, 9.0f, 30.0f, 14.0f }, 6.0f,
+        art::text (g, "POST", { postChip.getRight() + 4.0f, 7.0f, 32.0f, 16.0f }, 7.2f,
                    ! pre ? ink2 : dimText, juce::Justification::centredLeft, false, 1.4f);
     }
 
@@ -921,8 +977,8 @@ void AnalyserPanel::paint (juce::Graphics& g)
         const float y = dbToY ((float) db);
         g.setColour (juce::Colour (0xff1a1d22));
         g.drawLine (inner.getX(), y, inner.getRight(), y, 1.0f);
-        art::text (g, juce::String (db), { plot.getX() + 3.0f, y - 6.0f, 19.0f, 12.0f },
-                   5.6f, juce::Colour (0xff4a5058), juce::Justification::centredRight,
+        art::text (g, juce::String (db), { plot.getX() + 1.0f, y - 7.0f, 21.0f, 14.0f },
+                   6.6f, juce::Colour (0xff5a616a), juce::Justification::centredRight,
                    false, 0.2f);
     }
 
@@ -1015,10 +1071,10 @@ void AnalyserPanel::paint (juce::Graphics& g)
         if (i == 3) txt = juce::String ((int) std::round (val)) + "%";
         else        txt = val <= -60.0f ? "-inf" : juce::String (val, 1);
 
-        art::text (g, cap, { x, r.getBottom() - 32.0f, 70.0f, 10.0f }, 5.8f, dimText,
+        art::text (g, cap, { x, r.getBottom() - 34.0f, 70.0f, 12.0f }, 6.8f, dimText,
                    juce::Justification::centredLeft, false, 1.6f);
-        art::ledBox (g, { x + 38.0f, r.getBottom() - 38.0f, juce::jmin (bw - 44.0f, 62.0f), 15.0f },
-                     txt, 7.4f);
+        art::ledBox (g, { x + 40.0f, r.getBottom() - 40.0f, juce::jmin (bw - 46.0f, 66.0f), 18.0f },
+                     txt, 8.4f);
     }
 }
 
@@ -1098,7 +1154,7 @@ void ChainRail::paint (juce::Graphics& g)
     art::plate (g, r);
     art::screws (g, r);
 
-    art::text (g, "SIGNAL CHAIN", { 20.0f, 14.0f, 140.0f, 16.0f }, 8.0f, ink2,
+    art::text (g, "SIGNAL CHAIN", { 20.0f, 13.0f, 160.0f, 18.0f }, 9.4f, ink2,
                juce::Justification::centredLeft, false, 2.8f);
 
     g.setColour (juce::Colour (0xff0a0b0d));
@@ -1162,7 +1218,7 @@ void ChainRail::paint (juce::Graphics& g)
             g.drawEllipse (lx - 3.2f, y - 3.2f, 6.4f, 6.4f, 0.9f);
         }
 
-        art::text (g, row.name, { 38.0f, y - 8.0f, 120.0f, 16.0f }, 6.8f,
+        art::text (g, row.name, { 38.0f, y - 9.0f, 130.0f, 18.0f }, 8.4f,
                    hot ? ink : (on ? ink2 : dimText), juce::Justification::centredLeft,
                    false, 1.6f);
 
@@ -1180,14 +1236,14 @@ void ChainRail::paint (juce::Graphics& g)
         }
 
         {
-            g.setFont (monoFont (6.4f, 0.6f));
+            g.setFont (monoFont (7.6f, 0.6f));
             g.setColour (hot ? softAccent : dimText);
-            g.drawText (value, juce::Rectangle<float> (r.getRight() - 92.0f, y - 8.0f, 70.0f,
-                                                      16.0f),
+            g.drawText (value, juce::Rectangle<float> (r.getRight() - 96.0f, y - 9.0f, 74.0f,
+                                                      18.0f),
                         juce::Justification::centredRight, false);
         }
 
-        y += 26.0f;
+        y += 27.0f;
     }
 
     // ------------------------------------------------------------- utility
@@ -1196,12 +1252,12 @@ void ChainRail::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xff0a0b0d));
     g.drawLine (18.0f, uy - 12.0f, r.getRight() - 18.0f, uy - 12.0f, 1.0f);
 
-    art::text (g, "UTILITY / I/O", { 20.0f, uy - 6.0f, 140.0f, 16.0f }, 7.0f, ink2,
+    art::text (g, "UTILITY / I/O", { 20.0f, uy - 8.0f, 160.0f, 18.0f }, 8.6f, ink2,
                juce::Justification::centredLeft, false, 2.2f);
 
-    art::text (g, "MONO", { 196.0f, uy + 25.0f, 60.0f, 14.0f }, 6.0f, dimText,
+    art::text (g, "MONO", { 194.0f, uy + 24.0f, 70.0f, 18.0f }, 7.6f, dimText,
                juce::Justification::centredLeft, false, 1.4f);
-    art::text (g, "BYPASS", { 196.0f, uy + 49.0f, 60.0f, 14.0f }, 6.0f, dimText,
+    art::text (g, "BYPASS", { 194.0f, uy + 48.0f, 70.0f, 18.0f }, 7.6f, dimText,
                juce::Justification::centredLeft, false, 1.4f);
 }
 
@@ -1233,7 +1289,7 @@ void TabStrip::paint (juce::Graphics& g)
         auto tb = tabBounds (i);
         const bool on = i == current;
 
-        art::text (g, items[i], { tb.getX(), 10.0f, tb.getWidth(), 18.0f }, 8.6f,
+        art::text (g, items[i], { tb.getX(), 8.0f, tb.getWidth(), 22.0f }, 10.4f,
                    on ? ink : (i == hovered ? ink2 : muted),
                    juce::Justification::centred, false, 2.2f);
 
@@ -1297,13 +1353,13 @@ void PresetBar::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xff2e3239));
     g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
 
-    art::text (g, "PRESET", { r.getX() + 10.0f, r.getY() + 4.0f, 60.0f, 10.0f }, 5.8f,
+    art::text (g, "PRESET", { r.getX() + 10.0f, r.getY() + 3.0f, 80.0f, 12.0f }, 7.0f,
                dimText, juce::Justification::centredLeft, false, 2.0f);
 
     juce::String name = proc.getCurrentPresetName();
     if (proc.isPresetEdited()) name += " *";
 
-    g.setFont (monoFont (8.2f, 0.8f));
+    g.setFont (monoFont (9.4f, 0.8f));
     g.setColour (hoverZone < 0 ? softAccent : softAccent.withAlpha (0.92f));
     g.drawText (name.toUpperCase(),
                 juce::Rectangle<float> (r.getX() + 10.0f, r.getY() + 15.0f,
@@ -1721,14 +1777,14 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
 
         // the big dial: r = 48, so its block is 2r + 44 high and 2r + 26 wide
         if (engineKnob != nullptr)
-            engineKnob->setBounds (cx - 61, 80, 122, 140);
+            engineKnob->setBounds (cx - 64, 74, 128, 148);   // r = 48
 
         // CHARACTER / SPACE on the top row, DENSITY / WIDTH underneath
-        const int mx[4] { 45, 45, 433, 433 };
-        const int my[4] { 46, 142, 46, 142 };
+        const int mx[4] { 42, 42, 436, 436 };
+        const int my[4] { 44, 146, 44, 146 };
 
         for (int i = 0; i < (int) engineMacros.size() && i < 4; ++i)
-            engineMacros[(size_t) i]->setBounds (mx[i], my[i], 62, 80);
+            engineMacros[(size_t) i]->setBounds (mx[i], my[i], 68, 92);  // r = 19
     };
 
     addAndMakeVisible (*enginePanel);
@@ -1754,7 +1810,7 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
     // ------------------------------------------------------------------------ EQ
     eqPanel = std::make_unique<ModulePanel> (proc, "EQ");
     eqPanel->addPower (Params::eqOn, "EQ");
-    eqPanel->addKnob (Params::eqHpf,   "HPF",    Fmt::hz);
+    eqPanel->addKnob (Params::eqHpf,   "HPF",    Fmt::hz, false);   // focus page only
     eqPanel->addKnob (Params::eqLowG,  "LOW",    Fmt::db1);
     eqPanel->addKnob (Params::eqLmG,   "LO MID", Fmt::db1);
     eqPanel->addKnob (Params::eqHmG,   "HI MID", Fmt::db1);
@@ -1798,14 +1854,14 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
     satPanel->setChipRow (true);              // the ChoiceChip below draws this row
     satPanel->customLayout = [this]
     {
-        satType->setBounds (26, 46, juce::jmin (satPanel->getWidth() - 52, 132), 18);
+        satType->setBounds (26, 48, juce::jmin (satPanel->getWidth() - 52, 150), 22);
     };
     satPanel->resized();
 
     // ---------------------------------------------------------------------- VOCAL
     vocPanel = std::make_unique<ModulePanel> (proc, "VOCAL CONTROL");
     vocPanel->addPower (Params::vocOn, "VOX");
-    vocPanel->addKnob (Params::vocHpf,    "HPF",    Fmt::hz);
+    vocPanel->addKnob (Params::vocHpf,    "HPF",    Fmt::hz, false);  // focus page only
     vocPanel->addKnob (Params::vocBodyG,  "BODY",   Fmt::db1);
     vocPanel->addKnob (Params::vocDeessF, "DE-ESS", Fmt::hz);
     vocPanel->addKnob (Params::vocPresG,  "PRES",   Fmt::db1);
@@ -1923,6 +1979,7 @@ void Canvas::buildLayout()
         if (panel == nullptr) continue;
 
         panel->setVisible (false);
+        panel->setOverview (page == Page::all);
         panel->setSections ({});          // the MOTION card re-adds its two captions
     }
 
@@ -1956,14 +2013,14 @@ void Canvas::buildLayout()
             analyser->setBounds (764, 70, 368, 230);
             analyser->setStatsVisible (false);
 
-            place (eqPanel.get(),  { 212, 312, 298, 270 }, 1, 22.0f,  54.0f);
-            place (dynPanel.get(),  { 522, 312, 300, 270 }, 2, 22.0f,   0.0f);
-            place (satPanel.get(),  { 834, 312, 298, 270 }, 1, 22.0f,  74.0f);
-            place (vocPanel.get(),  { 212, 594, 298, 254 }, 1, 22.0f,  44.0f);
-            place (revPanel.get(),  { 522, 594, 300, 254 }, 1, 22.0f,  40.0f);
+            place (eqPanel.get(),  { 212, 312, 298, 270 }, 1, 26.0f,  54.0f);
+            place (dynPanel.get(),  { 522, 312, 300, 270 }, 2, 26.0f,   0.0f);
+            place (satPanel.get(),  { 834, 312, 298, 270 }, 1, 26.0f,  74.0f);
+            place (vocPanel.get(),  { 212, 594, 298, 254 }, 1, 26.0f,  44.0f);
+            place (revPanel.get(),  { 522, 594, 300, 254 }, 1, 26.0f,  40.0f);
 
             modPanel->setArtHeight (0.0f);
-            modPanel->setMaxRadius (17.0f);
+            modPanel->setMaxRadius (22.0f);
             modPanel->setSections ({ "MODULATION", "TRANSIENT" });
             modPanel->setBounds (834, 594, 298, 254);
             modPanel->setVisible (true);
@@ -1972,9 +2029,9 @@ void Canvas::buildLayout()
             break;
 
         case Page::eq:
-            place (eqPanel.get(),  hero, 1, 40.0f, 170.0f);
-            place (vocPanel.get(), compL, 1, 19.0f, 60.0f);
-            place (satPanel.get(), compR, 1, 19.0f, 60.0f);
+            place (eqPanel.get(),  hero, 1, 44.0f, 170.0f);
+            place (vocPanel.get(), compL, 1, 24.0f, 62.0f);
+            place (satPanel.get(), compR, 1, 24.0f, 62.0f);
 
             analyser->setBounds (anal);
             analyser->setStatsVisible (true);
@@ -1982,9 +2039,9 @@ void Canvas::buildLayout()
             break;
 
         case Page::dyn:
-            place (dynPanel.get(), hero,  1, 34.0f, 186.0f);
-            place (trnPanel.get(), compL, 1, 19.0f,  60.0f);
-            place (eqPanel.get(),  compR, 1, 19.0f,  60.0f);
+            place (dynPanel.get(), hero,  1, 36.0f, 186.0f);
+            place (trnPanel.get(), compL, 1, 24.0f,  62.0f);
+            place (eqPanel.get(),  compR, 1, 24.0f,  62.0f);
 
             analyser->setBounds (anal);
             analyser->setStatsVisible (true);
@@ -1992,9 +2049,9 @@ void Canvas::buildLayout()
             break;
 
         case Page::colour:
-            place (satPanel.get(), hero,  1, 34.0f, 150.0f);
-            place (vocPanel.get(), compL, 1, 19.0f,  60.0f);
-            place (eqPanel.get(),  compR, 1, 19.0f,  60.0f);
+            place (satPanel.get(), hero,  1, 44.0f, 150.0f);
+            place (vocPanel.get(), compL, 1, 24.0f,  62.0f);
+            place (eqPanel.get(),  compR, 1, 24.0f,  62.0f);
 
             analyser->setBounds (anal);
             analyser->setStatsVisible (true);
@@ -2002,8 +2059,8 @@ void Canvas::buildLayout()
             break;
 
         case Page::space:
-            place (revPanel.get(), { 212, 70, 454, 490 }, 1, 32.0f, 190.0f);
-            place (dlyPanel.get(), { 678, 70, 454, 490 }, 1, 32.0f, 190.0f);
+            place (revPanel.get(), { 212, 70, 454, 490 }, 1, 38.0f, 190.0f);
+            place (dlyPanel.get(), { 678, 70, 454, 490 }, 1, 38.0f, 190.0f);
 
             analyser->setBounds (212, 572, 920, 276);
             analyser->setStatsVisible (false);
@@ -2011,9 +2068,9 @@ void Canvas::buildLayout()
             break;
 
         case Page::mod:
-            place (modPanel.get(), hero,  1, 34.0f, 150.0f);
-            place (trnPanel.get(), compL, 1, 19.0f,  60.0f);
-            place (revPanel.get(), compR, 1, 19.0f,  60.0f);
+            place (modPanel.get(), hero,  1, 44.0f, 150.0f);
+            place (trnPanel.get(), compL, 1, 24.0f,  62.0f);
+            place (revPanel.get(), compR, 1, 24.0f,  62.0f);
 
             analyser->setBounds (anal);
             analyser->setStatsVisible (true);
@@ -2021,9 +2078,9 @@ void Canvas::buildLayout()
             break;
 
         case Page::image:
-            place (imgPanel.get(),  hero,  1, 34.0f, 170.0f);
-            place (bandPanel.get(), compL, 1, 19.0f,   0.0f);
-            place (satPanel.get(),  compR, 1, 19.0f,  60.0f);
+            place (imgPanel.get(),  hero,  1, 48.0f, 170.0f);
+            place (bandPanel.get(), compL, 1, 24.0f,   0.0f);
+            place (satPanel.get(),  compR, 1, 24.0f,  62.0f);
 
             analyser->setBounds (anal);
             analyser->setStatsVisible (true);
@@ -2046,6 +2103,9 @@ void Canvas::timerCallback()
     for (auto* p2 : all)
         if (p2 != nullptr && p2->isVisible())
             p2->refreshPowers();
+
+    if (satType != nullptr && satPanel != nullptr && satPanel->isVisible())
+        satType->refresh();
 
     if (dynPanel != nullptr && dynPanel->isVisible())
         dynPanel->setReadout ("GR " + juce::String (proc.getGainReductionDb(), 1));
@@ -2105,15 +2165,15 @@ void Canvas::paint (juce::Graphics& g)
         g.strokePath (flourish, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved));
 
         art::text (g, "MUSIC  \xc2\xb7  PEOPLE  \xc2\xb7  EMOTION",
-                   { railArea.getX(), 669.0f, railArea.getWidth(), 14.0f },
-                   6.2f, juce::Colour (0xffcbc3bd), juce::Justification::centred, false, 1.8f);
-        art::text (g, "ALWAYS", { railArea.getX(), 685.0f, railArea.getWidth(), 14.0f },
-                   6.2f, juce::Colour (0xffcbc3bd), juce::Justification::centred, false, 1.8f);
+                   { railArea.getX(), 666.0f, railArea.getWidth(), 16.0f },
+                   7.2f, juce::Colour (0xffcbc3bd), juce::Justification::centred, false, 1.8f);
+        art::text (g, "ALWAYS", { railArea.getX(), 684.0f, railArea.getWidth(), 16.0f },
+                   7.2f, juce::Colour (0xffcbc3bd), juce::Justification::centred, false, 1.8f);
 
-        art::text (g, "VERSION 1.0.0", { railArea.getX(), 789.0f, railArea.getWidth(), 14.0f },
-                   6.2f, faint, juce::Justification::centred, false, 2.6f);
-        art::text (g, "MH SIGNATURE", { railArea.getX(), 819.0f, railArea.getWidth(), 14.0f },
-                   6.0f, juce::Colour (0xff80868f), juce::Justification::centred, false, 3.6f);
+        art::text (g, "VERSION 1.0.0", { railArea.getX(), 786.0f, railArea.getWidth(), 16.0f },
+                   7.2f, faint, juce::Justification::centred, false, 2.6f);
+        art::text (g, "MH SIGNATURE", { railArea.getX(), 818.0f, railArea.getWidth(), 16.0f },
+                   7.0f, juce::Colour (0xff8b9199), juce::Justification::centred, false, 3.6f);
 
         g.setColour (juce::Colour (0xff22262c));
         g.drawLine (railArea.getRight() + 0.5f, railArea.getY(), railArea.getRight() + 0.5f,
@@ -2155,14 +2215,14 @@ void Canvas::paint (juce::Graphics& g)
         g.setColour (juce::Colour (0xff30343b));
         g.drawLine (82.0f, 12.0f, 82.0f, 50.0f, 1.0f);
 
-        art::text (g, "MH SIGNATURE", { 94.0f, 14.0f, 320.0f, 22.0f }, 13.0f, ink,
+        art::text (g, "MH SIGNATURE", { 94.0f, 11.0f, 320.0f, 26.0f }, 15.0f, ink,
                    juce::Justification::centredLeft, false, 4.0f);
-        art::text (g, "BY MILAD HASHEMI", { 95.0f, 34.0f, 280.0f, 14.0f }, 6.8f, dimText,
+        art::text (g, "BY MILAD HASHEMI", { 95.0f, 33.0f, 280.0f, 16.0f }, 8.0f, dimText,
                    juce::Justification::centredLeft, false, 3.2f);
 
-        art::text (g, "SOUND WITH", { 1352.0f, 13.0f, 76.0f, 13.0f }, 6.4f, dimText,
+        art::text (g, "SOUND WITH", { 1356.0f, 12.0f, 72.0f, 15.0f }, 7.4f, dimText,
                    juce::Justification::centredRight, false, 2.4f);
-        art::text (g, "INTENTION", { 1352.0f, 27.0f, 76.0f, 13.0f }, 6.4f, dimText,
+        art::text (g, "INTENTION", { 1356.0f, 28.0f, 72.0f, 15.0f }, 7.4f, dimText,
                    juce::Justification::centredRight, false, 2.4f);
     }
 
@@ -2177,14 +2237,14 @@ void Canvas::paint (juce::Graphics& g)
         g.setColour (juce::Colour (0xff2e3239));
         g.drawLine (0.0f, 862.0f, (float) designW, 862.0f, 1.0f);
 
-        art::text (g, "VERSION 1.0.0", { 212.0f, 873.0f, 200.0f, 14.0f }, 6.8f, faint,
+        art::text (g, "VERSION 1.0.0", { 212.0f, 871.0f, 200.0f, 18.0f }, 8.0f, faint,
                    juce::Justification::centredLeft, false, 2.6f);
 
-        art::text (g, "AN ALL-IN-ONE MIXING ENVIRONMENT", { 522.0f, 873.0f, 600.0f, 14.0f },
-                   8.6f, juce::Colour (0xffb0b7c0), juce::Justification::centred, false, 3.2f);
+        art::text (g, "AN ALL-IN-ONE MIXING ENVIRONMENT", { 522.0f, 871.0f, 600.0f, 18.0f },
+                   9.8f, juce::Colour (0xffb6bdc6), juce::Justification::centred, false, 3.2f);
 
-        art::text (g, "DESIGNED BY MILAD HASHEMI", { 1180.0f, 873.0f, 248.0f, 14.0f },
-                   6.8f, faint, juce::Justification::centredRight, false, 2.6f);
+        art::text (g, "DESIGNED BY MILAD HASHEMI", { 1160.0f, 871.0f, 268.0f, 18.0f },
+                   8.0f, faint, juce::Justification::centredRight, false, 2.6f);
     }
 }
 
@@ -2213,11 +2273,11 @@ MHSignatureAudioProcessorEditor::MHSignatureAudioProcessorEditor (MHSignatureAud
     if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
     {
         const auto area = d->userArea;
-        scale = juce::jmin (1.0f, (float) (area.getHeight() - 60) / (float) mhui::Canvas::designH);
-        scale = juce::jmin (scale, (float) (area.getWidth() - 40) / (float) mhui::Canvas::designW);
+        scale = juce::jmin (1.25f, (float) (area.getHeight() - 70) / (float) mhui::Canvas::designH);
+        scale = juce::jmin (scale, (float) (area.getWidth() - 60) / (float) mhui::Canvas::designW);
     }
 
-    scale = juce::jlimit (0.85f, 1.0f, scale);
+    scale = juce::jlimit (0.85f, 1.25f, scale);
 
     setSize (juce::roundToInt ((float) mhui::Canvas::designW * scale),
              juce::roundToInt ((float) mhui::Canvas::designH * scale));
