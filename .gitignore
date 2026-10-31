@@ -10,3 +10,8 @@ build/
 *.o
 *.obj
 .DS_Store
+
+# supersampled design boards (regenerate with assets/gui/rack/render_v3.py)
+assets/gui/rack/v3-*.png
+__pycache__/
+*.pyc

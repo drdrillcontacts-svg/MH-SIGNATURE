@@ -7,17 +7,16 @@
 /*==============================================================================
     MH SIGNATURE — the interface.
 
-    Everything is laid out in a fixed 1440 x 900 design space and scaled as one
-    unit, so the type is never squeezed.  The window can be dragged from 85 % to
-    200 %; the design keeps its aspect ratio.
+    A page-based hardware desk.  Nothing is crammed onto one board: the ALL tab
+    is the overview, and every other tab gives one module the whole desk.
 
-    The grid below is the same grid the design board was drawn on:
+        header   monogram · MH SIGNATURE · tabs · preset window
+        rail     portrait (left) · signal chain + utility (right)
+        desk     brushed plates, metal dials, a small LED window per control
 
-        portrait | input   | SIGNATURE ENGINE        | spectrum        | output
-        ---------+---------+-------------------------+-----------------+-------
-                 | EQ      | DYNAMICS                | SATURATION      |
-                 | VOCAL   | REVERB | DELAY          | IMAGER          |
-                 | MOD     | TRANSIENT               | I/O             |
+    Everything is drawn in a fixed 1440 x 900 design space and scaled as one
+    unit, so the type is never squeezed.  The window can be dragged from 85 %
+    to 200 % and keeps its aspect ratio.
 ==============================================================================*/
 namespace mhui
 {
@@ -25,47 +24,58 @@ namespace mhui
 //==============================================================================
 //  Palette — design/tokens.json
 //==============================================================================
-inline const juce::Colour noir       { 0xff050607 };
-inline const juce::Colour cardTop    { 0xff101216 };
-inline const juce::Colour cardBottom { 0xff07080a };
-inline const juce::Colour edgeCol    { 0xff292d34 };
+inline const juce::Colour noir       { 0xff070708 };
+inline const juce::Colour plateTop   { 0xff191b1f };
+inline const juce::Colour plateBot   { 0xff0d0e11 };
+inline const juce::Colour plateEdge  { 0xff2e3239 };
+inline const juce::Colour bevelHi    { 0xff42474f };
+inline const juce::Colour ink        { 0xffeceff2 };
+inline const juce::Colour ink2       { 0xffc6ccd3 };
+inline const juce::Colour muted      { 0xff8c939d };
+inline const juce::Colour dimText    { 0xff5f6670 };
+inline const juce::Colour faint      { 0xff40454e };
 inline const juce::Colour accent     { 0xffd0361c };
-inline const juce::Colour deepAccent { 0xff8f2412 };
+inline const juce::Colour deepAccent { 0xff882111 };
 inline const juce::Colour softAccent { 0xfff2745a };
-inline const juce::Colour ink        { 0xffeef1f5 };
-inline const juce::Colour ink2       { 0xffcfd5dc };
-inline const juce::Colour muted      { 0xff8e96a1 };
-inline const juce::Colour dim        { 0xff626974 };
-inline const juce::Colour faint      { 0xff444952 };
-inline const juce::Colour trackCol   { 0xff2c3038 };
-inline const juce::Colour gridCol    { 0xff1a1d23 };
+inline const juce::Colour ledBg      { 0xff0d0b0b };
+inline const juce::Colour metalTop   { 0xff686c72 };
+inline const juce::Colour metalBot   { 0xff282b30 };
 
 enum class Fmt { int0, db1, pct0, hz, ms, sec1, ratio, raw1, dbInt };
 
 juce::String formatValue (float v, Fmt f);
 
-//==============================================================================
-//  Type scale — big enough to read at 100 %
-//==============================================================================
-inline constexpr float typeLabel   = 10.0f;   // knob names
-inline constexpr float typeValue   = 9.4f;    // knob values
-inline constexpr float typeModule  = 10.4f;   // module titles
-inline constexpr float typeSmall   = 8.2f;    // chips, tabs, read-outs
+inline constexpr float typeLabel  = 7.8f;
+inline constexpr float typeValue  = 7.2f;
+inline constexpr float typeModule = 9.4f;
+inline constexpr float typeSmall  = 6.4f;
+inline constexpr float typeMicro  = 5.8f;
 
 juce::Font uiFont (float size, bool bold = false, float kerning = 1.2f);
-juce::Font displayFont (float size, bool bold = false, float kerning = 2.4f);
+juce::Font monoFont (float size, float kerning = 0.2f);
 
 //==============================================================================
-/** Shared painting: the black glass card every module sits on. */
+/** Shared painting. */
 namespace art
 {
-    void card (juce::Graphics&, juce::Rectangle<float> area, float radius = 8.0f,
-               float glow = 0.0f);
-    void glowArc (juce::Graphics&, float cx, float cy, float r,
-                  float a0, float a1, juce::Colour, float width);
+    /** A brushed-metal plate with a bevel and four screws. */
+    void plate (juce::Graphics&, juce::Rectangle<float> area, float radius = 6.0f);
+    void screws (juce::Graphics&, juce::Rectangle<float> area);
+    /** The dark digital window a value is printed in. */
+    void ledBox (juce::Graphics&, juce::Rectangle<float> area, const juce::String& text,
+                 float size, juce::Colour textColour = softAccent);
+    /** A rocker switch, drawn for PowerSwitch and for the static rail. */
+    void rocker (juce::Graphics&, juce::Rectangle<float> area, bool on, bool hover);
+    void text (juce::Graphics&, const juce::String&, juce::Rectangle<float> area,
+               float size, juce::Colour, juce::Justification, bool bold = false,
+               float kerning = 1.2f);
 }
 
 //==============================================================================
+/** A metal dial: printed tick scale, a vermilion value arc, a brushed cap with
+    a pointer, the parameter name underneath and its value in a small LED
+    window.  Dragging up increases the value; double-click restores the default.
+    The pointer angle is the same as the value arc, so nothing can read backwards. */
 class MhKnob : public juce::Slider
 {
 public:
@@ -73,24 +83,23 @@ public:
             const juce::String& paramId,
             const juce::String& labelText,
             Fmt format,
-            bool bigStyle = false,
+            bool ticks = true,
             bool hideText = false);
 
     void paint (juce::Graphics&) override;
     void mouseEnter (const juce::MouseEvent&) override;
     void mouseExit  (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
-    void setAccentGlow (float g);
     void setDimmed (bool shouldDim);
 
     juce::String knobLabel;
 
 private:
     Fmt fmt;
-    bool big = false;
+    bool showTicks = true;
     bool noText = false;
     bool dimmed = false;
-    float glow = 0.0f;
     bool hovered = false;
     juce::RangedAudioParameter* param = nullptr;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
@@ -99,75 +108,82 @@ private:
 };
 
 //==============================================================================
-/** The per-module ON / OFF switch: a lamp in a pill that reads ON or OFF. */
+/** The per-module OFF switch.  A physical rocker: click flips the parameter,
+    the lamp and the word next to it follow the parameter. */
 class PowerSwitch : public juce::Button
 {
 public:
     PowerSwitch (MHSignatureAudioProcessor& proc,
                  const juce::String& paramId,
-                 const juce::String& shortName);
+                 const juce::String& shortName,
+                 bool compact = false);
 
     void paintButton (juce::Graphics&, bool over, bool down) override;
+    void clicked() override;
+
+    /** Re-reads the parameter; called by the editor timer. */
+    void refresh();
 
     std::function<void()> onToggle;
 
     juce::String moduleName;
 
 private:
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment;
+    juce::RangedAudioParameter* param = nullptr;
+    bool compactStyle = false;
+    bool state = true;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PowerSwitch)
 };
 
 //==============================================================================
-/** A black glass module card: lamp + title + read-out in the header, optional
-    artwork, then one row of named knobs. */
+/** One hardware module: plate, header with its rocker, optional artwork,
+    optional chip, then its dials. */
 class ModulePanel : public juce::Component
 {
 public:
-    ModulePanel (MHSignatureAudioProcessor& proc, const juce::String& title,
-                 bool showSwitch = true);
+    ModulePanel (MHSignatureAudioProcessor& proc, const juce::String& title);
 
     void addPower (const juce::String& paramId, const juce::String& shortName);
-    void addKnob (const juce::String& id, const juce::String& label, Fmt fmt,
-                  bool accentPointer = false);
+    void addKnob (const juce::String& id, const juce::String& label, Fmt fmt);
     void setArt (std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer);
+    void setArtHeight (float h);
     void setReadout (juce::String text);
-    void setCaption (juce::String text);
-    void setGlow (float g);
-
-    bool isAnyModuleOn() const;
-    void refreshDimming();
-    void setFocused (bool shouldBeFocused);
+    void setChip (juce::String name, juce::String value);
+    void setChipRow (bool reserve);
+    void setRows (int rows);
+    void setMaxRadius (float r);
+    void setSections (juce::StringArray labels);
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    juce::Rectangle<int> getBodyArea() const;
-    juce::Rectangle<int> getArtArea() const;
-    juce::Rectangle<int> headerArea() const;
+    bool isAnyModuleOn() const;
+    void refreshPowers();
 
     juce::String title;
-
-    /** Extra placement for children that are not knobs (engine macros, chips). */
     std::function<void()> customLayout;
 
 private:
+    juce::Rectangle<int> dialBox() const;
+    juce::Rectangle<int> artBand() const;
+
     MHSignatureAudioProcessor& proc;
     std::vector<std::unique_ptr<MhKnob>> knobs;
     std::vector<std::unique_ptr<PowerSwitch>> powers;
 
     std::function<void (juce::Graphics&, juce::Rectangle<float>)> artDrawer;
-    juce::String readout, caption;
-    bool hasSwitch = true;
-    bool focused = true;
-    float glowAmount = 0.0f;
+    juce::String readout, chipName, chipValue;
+    juce::StringArray sections;
+    int rowsWanted = 1;
+    float maxR = 22.0f;
+    float artHeight = 0.0f;
+    bool chipRow = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModulePanel)
 };
 
 //==============================================================================
-/** Cycles a choice parameter on click. */
 class ChoiceChip : public juce::Component, public juce::SettableTooltipClient
 {
 public:
@@ -186,19 +202,66 @@ private:
 };
 
 //==============================================================================
-/** A tall thin level meter: its own card, a segmented bar, dB ticks and a
-    numeric read-out. */
-class LevelMeter : public juce::Component
+/** Spectrum / waveform / loudness screen with a live statistics row. */
+class AnalyserPanel : public juce::Component,
+                      private juce::Timer
 {
 public:
-    LevelMeter (MHSignatureAudioProcessor& proc, bool inputSide);
+    explicit AnalyserPanel (MHSignatureAudioProcessor& proc);
+    ~AnalyserPanel() override;
+
     void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    void setStatsVisible (bool shouldShow);
+
+private:
+    void timerCallback() override;
+
+    juce::Rectangle<float> plotArea() const;
+    juce::Rectangle<float> tabRect (int i) const;
+    juce::Rectangle<float> chipRect (int i) const;
+
+    MHSignatureAudioProcessor& proc;
+    int mode = 0;
+    bool pre = false;
+    bool stats = true;
+
+    juce::StringArray tabNames { "SPECTRUM", "WAVE", "LOUDNESS" };
+
+    std::array<float, MHSignatureAudioProcessor::numSpectrumBands> spec {}, specPre {};
+    std::array<float, MHSignatureAudioProcessor::numScopeSamples> wave {};
+    std::array<float, 128> hist {};
+    int histIndex = 0, loudCounter = 0;
+    float loudAccum = -90.0f;
+    float peakHold = -90.0f;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AnalyserPanel)
+};
+
+//==============================================================================
+/** The right-hand rail: the order of the chain, a lamp per module that shows
+    whether it is actually in the chain, and the utility section. */
+class ChainRail : public juce::Component
+{
+public:
+    explicit ChainRail (MHSignatureAudioProcessor& proc);
+    ~ChainRail() override;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    void setActive (const juce::String& moduleName);
+    void refresh();
 
 private:
     MHSignatureAudioProcessor& proc;
-    bool isInput;
+    juce::String active;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LevelMeter)
+    std::unique_ptr<MhKnob> inKnob, outKnob;
+    std::unique_ptr<PowerSwitch> monoSwitch, bypassSwitch;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChainRail)
 };
 
 //==============================================================================
@@ -213,6 +276,7 @@ public:
 
     std::function<void (int)> onTabChanged;
     int getIndex() const { return current; }
+    void setIndex (int i) { current = i; repaint(); }
 
 private:
     juce::StringArray items { "ALL", "EQ", "DYN", "COLOR", "SPACE", "MOD", "IMAGE" };
@@ -235,46 +299,17 @@ public:
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
 
+    /** follows the preset book from the editor's timer */
+    void refresh();
+
 private:
     void showBrowser();
 
     MHSignatureAudioProcessor& proc;
     int hoverZone = 0;
+    juce::String lastShown;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PresetBar)
-};
-
-//==============================================================================
-class SpectrumPanel : public juce::Component,
-                      private juce::Timer
-{
-public:
-    explicit SpectrumPanel (MHSignatureAudioProcessor& proc);
-    ~SpectrumPanel() override;
-
-    void paint (juce::Graphics&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-
-private:
-    void timerCallback() override;
-
-    juce::Rectangle<float> plotArea() const;
-    juce::Rectangle<float> tabRect (int i) const;
-    juce::Rectangle<float> chipRect (int i) const;
-
-    MHSignatureAudioProcessor& proc;
-    int mode = 0;
-    bool pre = false;
-
-    juce::StringArray tabNames { "SPECTRUM", "WAVEFORM", "LOUDNESS" };
-
-    std::array<float, MHSignatureAudioProcessor::numSpectrumBands> spec {}, specPre {};
-    std::array<float, MHSignatureAudioProcessor::numScopeSamples> wave {};
-    std::array<float, 128> hist {};
-    int histIndex = 0, loudCounter = 0;
-    float loudAccum = -90.0f;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SpectrumPanel)
 };
 
 //==============================================================================
@@ -286,31 +321,32 @@ public:
     ~Canvas() override;
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void timerCallback() override;
 
     static constexpr int designW = 1440;
     static constexpr int designH = 900;
 
 private:
+    enum class Page { all = 0, eq, dyn, colour, space, mod, image };
+
+    void showPage (Page p);
     void buildLayout();
-    void applyFocus (int tab);
 
     MHSignatureAudioProcessor& proc;
     juce::Image portrait;
-    float lfoPhase = 0.0f;
-    float engineGlow = 0.0f;
+    Page page = Page::all;
 
-    std::unique_ptr<ModulePanel> enginePanel, eqPanel, dynPanel, satPanel,
-                                 vocPanel, spacePanel, delayPanel, imgPanel,
-                                 modPanel, trnPanel, ioPanel;
+    std::unique_ptr<ModulePanel> enginePanel, eqPanel, dynPanel, satPanel, vocPanel,
+                                 revPanel, dlyPanel, modPanel, trnPanel, imgPanel,
+                                 bandPanel;
     std::vector<std::unique_ptr<MhKnob>> engineMacros;
     std::unique_ptr<MhKnob> engineKnob;
     std::unique_ptr<ChoiceChip> satType;
-    std::unique_ptr<PowerSwitch> monoSwitch, bypassSwitch;
-    std::unique_ptr<LevelMeter> inMeter, outMeter;
+    std::unique_ptr<AnalyserPanel> analyser;
+    std::unique_ptr<ChainRail> rail;
     std::unique_ptr<TabStrip> tabs;
     std::unique_ptr<PresetBar> presetBar;
-    std::unique_ptr<SpectrumPanel> spectrumPanel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Canvas)
 };
