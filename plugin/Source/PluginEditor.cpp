@@ -572,7 +572,13 @@ void ModulePanel::setArt (std::function<void (juce::Graphics&, juce::Rectangle<f
     repaint();
 }
 
-void ModulePanel::setReadout (juce::String t) { readout = std::move (t); repaint(); }
+void ModulePanel::setReadout (juce::String t)
+{
+    if (readout == t) return;
+
+    readout = std::move (t);
+    repaint();
+}
 
 void ModulePanel::setChip (juce::String name, juce::String value)
 {
