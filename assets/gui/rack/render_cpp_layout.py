@@ -41,6 +41,7 @@ D = {
                 ("MIX", "24%", 0.24)],
     "delay":   [("TIME", "375 ms", 0.18), ("FDBK", "36%", 0.38), ("FILTER", "7.2 k", 0.33),
                 ("MIX", "18%", 0.18)],
+    "mod":     [("RATE", "0.30", 0.05), ("DEPTH", "28%", 0.28), ("MIX", "16%", 0.16)],
     "motion":  [("RATE", "0.30", 0.05), ("DEPTH", "28%", 0.28), ("MIX", "16%", 0.16),
                 ("ATTACK", "+12", 0.56), ("SUSTAIN", "-8", 0.46), ("SPLIT", "180 Hz", 0.07)],
     "trns":    [("ATTACK", "+12", 0.56), ("SUSTAIN", "-8", 0.46), ("SPLIT", "180 Hz", 0.07)],
@@ -56,15 +57,15 @@ img = R.new_board()
 def labelled_dial(cx, cy, r, lab, val, frac):
     """dial() draws its own label/read-out; here the type scale is the C++ one."""
     d = ImageDraw.Draw(img)
-    label_size = max(8.0, min(11.0, r * 0.30))
-    value_size = max(7.4, min(10.0, r * 0.26))
+    label_size = max(7.8, min(10.4, r * 0.33))
+    value_size = max(7.4, min(9.6, r * 0.29))
 
     R.dial(img, cx, cy, r, "", "", frac)
 
     d = ImageDraw.Draw(img)
-    R.text(d, (cx, cy + r + 15), lab, label_size, INK2, track=1.4)
+    R.text(d, (cx, cy + r + 13), lab, label_size, INK2, track=1.4, anchor="mt")
     w = max(min(62.0 if r >= 40 else 42.0, r * 1.6 + 14.0), len(val) * (value_size * 0.62) + 12.0)
-    R.led(img, (cx - w / 2, cy + r + 25, cx + w / 2, cy + r + 43), val, size=value_size)
+    R.led(img, (cx - w / 2, cy + r + 24, cx + w / 2, cy + r + 42), val, size=value_size)
 
 
 def panel(box, title, key, rows=1, max_r=26.0, art=None, art_h=0.0, chip=False,
@@ -82,15 +83,15 @@ def panel(box, title, key, rows=1, max_r=26.0, art=None, art_h=0.0, chip=False,
     px_ = x1 - 30
     for name, on in reversed(powers):
         single = (n == 1)
-        px_ -= 84 if single else 44
+        px_ -= 96 if single else 44
         if single:
-            R.toggle(img, px_, y0 + 10, on, 46, 18, True)
+            R.toggle(img, px_, y0 + 9, on, 40, 18, True)
         else:
             R.toggle(img, px_, y0 + 11, on, 30, 16, False)
         px_ -= 0 if single else 8
 
     if readout:
-        right = x1 - 30 - (0 if n == 0 else (90 if n == 1 else 100))
+        right = x1 - 30 - (0 if n == 0 else 100)
         R.text(d, (right, y0 + 20), readout, 8.2, DIM, track=1.1, anchor="rm")
 
     R.dline(d, x0 + 26, y0 + 38, x1 - 26, y0 + 38, (10, 11, 13), 1.0)
@@ -107,10 +108,14 @@ def panel(box, title, key, rows=1, max_r=26.0, art=None, art_h=0.0, chip=False,
                anchor="rm", mono=True)
         top += 24
 
+    box_w = max(1, w - 32)
+    box_h = max(1, h - 8 - top)
+    n = len(D[key])
+
     if sections:
         secs = len(sections)
-        row_h = (h - 8 - 48) // secs
-        per = math.ceil(len(D[key]) / secs)
+        row_h = max(1, (h - 8 - 48) // secs)
+        per = math.ceil(n / secs)
 
         for i, lab in enumerate(sections):
             R.text(d, (x0 + 30, y0 + 48 + row_h * i + 8), lab, 8.0, DIM, track=2.2, anchor="lm")
@@ -120,13 +125,14 @@ def panel(box, title, key, rows=1, max_r=26.0, art=None, art_h=0.0, chip=False,
 
         for i, (lab, val, frac) in enumerate(D[key]):
             sec, ci = i // per, i % per
-            cnt = min(per, len(D[key]) - sec * per)
-            slot_w = (w - 32) // cnt
-            box_h = row_h - 18
-            r = max(9.0, min((slot_w - 30) / 2.0, (box_h - 52) / 2.0, max_r))
-            r = round(r)
+            cnt = min(per, n - sec * per)
+            slot_w = max(1, box_w // cnt)
+            sec_h = max(1, row_h - 18)
+            r = int(max(6.0, min(slot_w / 2 - 13, sec_h / 2 - 23, max_r)))
+            block_h = min(2 * r + 46, max(30, sec_h - 2))
+            drop = max(0, sec_h - block_h) // 2
             cx = x0 + 16 + slot_w * (ci + 0.5)
-            cy = y0 + 48 + row_h * sec + 16 + (box_h - (2 * r + 52)) / 2 + r
+            cy = y0 + 48 + row_h * sec + 16 + drop + r
             labelled_dial(cx, cy, r, lab, val, frac)
         return
 
@@ -137,22 +143,22 @@ def panel(box, title, key, rows=1, max_r=26.0, art=None, art_h=0.0, chip=False,
         else:
             art(ImageDraw.Draw(img), band)
         top += art_h + 12
+        box_h = max(1, h - 8 - top)
 
-    box_h = h - 8 - top
-    per = math.ceil(len(D[key]) / rows)
-    slot_w = (w - 32) // per
-    slot_h = box_h // rows
-    r = round(max(9.0, min((slot_w - 30) / 2.0, (slot_h - 52) / 2.0, max_r)))
-
-    slack = max(0, slot_h - (2 * r + 52))
+    rows = max(1, rows)
+    per = max(1, math.ceil(n / rows))
+    slot_w = max(1, box_w // per)
+    slot_h = max(1, box_h // rows)
+    r = int(max(6.0, min(slot_w / 2 - 13, slot_h / 2 - 23, max_r)))
+    block_h = min(2 * r + 46, max(30, slot_h - 2))
+    slack = max(0, slot_h - block_h)
 
     for i, (lab, val, frac) in enumerate(D[key]):
         ri, ci = i // per, i % per
-        cx = x0 + 16 + slot_w * (ci + 0.5)
         drop = max(0, slack - 4) if rows == 1 else slack // 2
+        cx = x0 + 16 + slot_w * (ci + 0.5)
         cy = y0 + top + slot_h * ri + drop + r
         labelled_dial(cx, cy, r, lab, val, frac)
-
 
 def engine(box):
     R.plate(img, box, "", True)
@@ -182,15 +188,13 @@ def page_all():
     R.analyser_plate(img, (764, 70, 1132, 300), stats=False)
 
     panel((212, 312, 510, 582), "EQ", "eq_all", 1, 26.0, R.art_eq, 54, readout="4 BANDS")
-    panel((522, 312, 822, 582), "DYNAMICS", "dyn", 2, 26.0, None, 0, readout="GR -6.8 dB",
-          powers=(("COMP", True), ("LIMIT", True)))
+    panel((522, 312, 822, 582), "DYNAMICS", "dyn", 2, 26.0, None, 0, readout="GR -6.8 dB")
     panel((834, 312, 1132, 582), "COLOUR", "colour", 1, 26.0, R.art_sat, 74, chip=True)
     panel((212, 594, 510, 848), "VOCAL", "vocal_all", 1, 26.0, R.art_vo, 44,
           readout="DE-ESS 6.5K")
-    panel((522, 594, 822, 848), "REVERB", "reverb", 1, 26.0, R.art_decay, 40, readout="3.4 s",
-          powers=(("REVERB", True), ("DELAY", True)))
-    panel((834, 594, 1132, 848), "MOTION", "motion", 2, 22.0, None, 0,
-          sections=("MODULATION", "TRANSIENT"), powers=(("MOD", True), ("TRNS", True)))
+    panel((522, 594, 822, 848), "REVERB", "reverb", 1, 26.0, R.art_decay, 40, readout="3.4 s")
+    panel((834, 594, 1132, 848), "MOTION", "motion", 2, 17.0, None, 0,
+          sections=("MODULATION", "TRANSIENT"))
 
     R.chain_column(img, R.RAIL, active=("ENGINE",))
 
@@ -217,7 +221,54 @@ def page_image():
     R.chain_column(img, R.RAIL, active=("IMAGER",))
 
 
-PAGES = {"all": page_all, "eq": page_eq, "image": page_image}
+def page_dyn():
+    R.portrait_rail(img)
+    R.header(img, "DYN")
+    R.footer(img)
+    panel((212, 70, 820, 560), "DYNAMICS  /  LIMITER", "dyn", 1, 36.0, R.art_comp, 186,
+          readout="GR -6.8 dB", powers=(("COMP", True), ("LIMIT", True)))
+    R.analyser_plate(img, (832, 70, 1132, 560), stats=True)
+    panel((212, 572, 662, 848), "TRANSIENT", "trns", 1, 24.0, R.art_transient, 62, readout="180 Hz")
+    panel((674, 572, 1132, 848), "EQ", "eq", 1, 24.0, R.art_eq, 62, readout="4 BANDS + HPF")
+    R.chain_column(img, R.RAIL, active=("DYNAMICS",))
+
+
+def page_colour():
+    R.portrait_rail(img)
+    R.header(img, "COLOR")
+    R.footer(img)
+    panel((212, 70, 820, 560), "SATURATION  /  COLOUR", "colour", 1, 44.0, R.art_sat, 150,
+          chip=True, readout="CONSOLE")
+    R.analyser_plate(img, (832, 70, 1132, 560), stats=True)
+    panel((212, 572, 662, 848), "VOCAL", "vocal", 1, 24.0, R.art_vo, 62, readout="DE-ESS 6.5K")
+    panel((674, 572, 1132, 848), "EQ", "eq", 1, 24.0, R.art_eq, 62, readout="4 BANDS + HPF")
+    R.chain_column(img, R.RAIL, active=("COLOUR",))
+
+
+def page_space():
+    R.portrait_rail(img)
+    R.header(img, "SPACE")
+    R.footer(img)
+    panel((212, 70, 666, 560), "REVERB", "reverb", 1, 38.0, R.art_decay, 190, readout="3.4 s",
+          powers=(("REVERB", True), ("DELAY", True)))
+    panel((678, 70, 1132, 560), "DELAY", "delay", 1, 38.0, R.art_delay, 190, readout="375 ms")
+    R.analyser_plate(img, (212, 572, 1132, 848), stats=False)
+    R.chain_column(img, R.RAIL, active=("REVERB", "DELAY"))
+
+
+def page_mod():
+    R.portrait_rail(img)
+    R.header(img, "MOD")
+    R.footer(img)
+    panel((212, 70, 820, 560), "MODULATION", "mod", 1, 44.0, R.art_lfo, 150, readout="0.30 Hz")
+    R.analyser_plate(img, (832, 70, 1132, 560), stats=True)
+    panel((212, 572, 662, 848), "TRANSIENT", "trns", 1, 24.0, R.art_transient, 62, readout="180 Hz")
+    panel((674, 572, 1132, 848), "REVERB", "reverb", 1, 24.0, R.art_decay, 62, readout="3.4 s")
+    R.chain_column(img, R.RAIL, active=("MODULATION",))
+
+
+PAGES = {"all": page_all, "eq": page_eq, "dyn": page_dyn, "colour": page_colour,
+         "space": page_space, "mod": page_mod, "image": page_image}
 
 if __name__ == "__main__":
     name = sys.argv[1] if len(sys.argv) > 1 else "all"

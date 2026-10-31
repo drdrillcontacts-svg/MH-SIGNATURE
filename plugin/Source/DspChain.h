@@ -254,6 +254,7 @@ public:
     {
         sampleRate = sr;
         wetBuffer.setSize (2, juce::jmax (64, blockSize), false, true, true);
+        sideBuffer.setSize (1, juce::jmax (64, blockSize), false, true, true);
         delay.prepare (sr);
         chorus.prepare (sr);
         reverb.setSampleRate (sr);
@@ -670,7 +671,10 @@ private:
         monoLow.set (juce::dsp::IIR::Coefficients<float>::makeLowPass (
             sampleRate, juce::jlimit (30.0f, 400.0f, p.monoF), 0.707f));
 
-        juce::AudioBuffer<float> side (1, n);
+        if (sideBuffer.getNumSamples() < n)
+            sideBuffer.setSize (1, n, false, true, true);
+
+        juce::AudioBuffer<float> side (sideBuffer.getArrayOfWritePointers(), 1, n);
         auto* sideD = side.getWritePointer (0);
 
         for (int i = 0; i < n; ++i)
@@ -753,7 +757,7 @@ private:
     Biq sideLow, sideMid, sideHigh, monoLow, sideLowHP, monoHP;
 
     Delay delay, preDelay;
-    juce::AudioBuffer<float> wetBuffer;
+    juce::AudioBuffer<float> wetBuffer, sideBuffer;
     ChorusLite chorus;
     juce::Reverb reverb;
 

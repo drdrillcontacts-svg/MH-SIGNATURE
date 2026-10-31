@@ -119,7 +119,8 @@ public:
     PowerSwitch (MHSignatureAudioProcessor& proc,
                  const juce::String& paramId,
                  const juce::String& shortName,
-                 bool compact = false);
+                 bool compact = false,
+                 const juce::String& secondId = {});
 
     void paintButton (juce::Graphics&, bool over, bool down) override;
 
@@ -132,6 +133,7 @@ public:
 
 private:
     juce::RangedAudioParameter* param = nullptr;
+    juce::RangedAudioParameter* second = nullptr;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment;
     bool compactStyle = false;
 
@@ -146,7 +148,8 @@ class ModulePanel : public juce::Component
 public:
     ModulePanel (MHSignatureAudioProcessor& proc, const juce::String& title);
 
-    void addPower (const juce::String& paramId, const juce::String& shortName);
+    void addPower (const juce::String& paramId, const juce::String& shortName,
+                   const juce::String& secondId = {});
     void addKnob (const juce::String& id, const juce::String& label, Fmt fmt,
                   bool primary = true);
     void setArt (std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawer);
@@ -186,6 +189,7 @@ private:
     int rowsWanted = 1;
     float maxR = 22.0f;
     float artHeight = 0.0f;
+    float artHeightEff = 0.0f;
     bool chipRow = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ModulePanel)
@@ -262,13 +266,18 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
 
     void setActive (const juce::String& moduleName);
     void refresh();
 
+
 private:
     MHSignatureAudioProcessor& proc;
     juce::String active;
+    int hoveredRow = -1;
 
     std::unique_ptr<MhKnob> inKnob, outKnob;
     std::unique_ptr<PowerSwitch> monoSwitch, bypassSwitch;

@@ -214,7 +214,9 @@ MhKnob::MhKnob (MHSignatureAudioProcessor& proc, const juce::String& paramId,
     setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     setWantsKeyboardFocus (false);
-    setMouseDragSensitivity (260);         // a full sweep needs 260 px: fine control
+    setMouseDragSensitivity (200);         // a full sweep needs 200 px: fine control
+    setRotaryParameters (juce::MathConstants<float>::pi * -0.75f,
+                         juce::MathConstants<float>::pi * 0.75f, true);
     setVelocityBasedMode (false);
 
     if (auto* p = proc.apvts.getParameter (paramId))
@@ -259,11 +261,11 @@ void MhKnob::paint (juce::Graphics& g)
     auto b = getLocalBounds().toFloat();
     if (b.getWidth() < 24.0f || b.getHeight() < 34.0f) return;
 
-    // the block is 2r + 52 high and at least 2r + 30 wide
-    const float r = juce::jlimit (9.0f, 60.0f,
-                                  juce::jmin ((b.getWidth() - 30.0f) * 0.5f,
-                                              (b.getHeight() - 52.0f) * 0.5f));
-    if (r < 8.0f) return;
+    // the block is 2r + 46 high (label + value window live inside that band)
+    const float r = juce::jlimit (6.0f, 64.0f,
+                                  juce::jmin (b.getWidth() * 0.5f - 13.0f,
+                                              b.getHeight() * 0.5f - 23.0f));
+    if (r < 5.0f) return;
 
     const float cx = b.getCentreX();
     const float cy = b.getY() + r;
@@ -371,11 +373,11 @@ void MhKnob::paint (juce::Graphics& g)
     if (noText) { g.setOpacity (1.0f); return; }
 
     // ---- printed name, then the digital value window
-    const float labelSize = juce::jlimit (8.0f, 11.0f, r * 0.30f);
-    const float valueSize = juce::jlimit (7.4f, 10.0f, r * 0.26f);
+    const float labelSize = juce::jlimit (7.8f, 10.4f, r * 0.33f);
+    const float valueSize = juce::jlimit (7.4f, 9.6f, r * 0.29f);
 
     if (knobLabel.isNotEmpty())
-        art::text (g, knobLabel, { b.getX(), cy + r + 8.0f, b.getWidth(), 14.0f },
+        art::text (g, knobLabel, { b.getX(), cy + r + 13.0f, b.getWidth(), 14.0f },
                    labelSize, ink2, juce::Justification::centred, false, 1.4f);
 
     const juce::String valueText = (float) value >= -0.049f && (float) value <= 0.049f
@@ -387,7 +389,7 @@ void MhKnob::paint (juce::Graphics& g)
                                       juce::jmax (juce::jmin (capW, r * 1.6f + 14.0f),
                                                   (float) valueText.length() * (valueSize * 0.62f) + 12.0f));
 
-    const float boxY = cy + r + 25.0f;
+    const float boxY = cy + r + 24.0f;
 
     if (boxY + 18.0f <= b.getBottom() + 1.5f)
         art::ledBox (g, { cx - textW * 0.5f, boxY, textW, 18.0f }, valueText, valueSize);
@@ -397,10 +399,14 @@ void MhKnob::paint (juce::Graphics& g)
 
 //==============================================================================
 PowerSwitch::PowerSwitch (MHSignatureAudioProcessor& proc, const juce::String& paramId,
-                          const juce::String& shortName, bool compact)
+                          const juce::String& shortName, bool compact,
+                          const juce::String& secondId)
     : juce::Button (paramId), moduleName (shortName), compactStyle (compact)
 {
     param = proc.apvts.getParameter (paramId);
+
+    if (secondId.isNotEmpty())
+        second = proc.apvts.getParameter (secondId);
 
     // The button toggles itself and the attachment writes the parameter; the
     // attachment also pushes the parameter back into the button when a preset
@@ -414,6 +420,16 @@ PowerSwitch::PowerSwitch (MHSignatureAudioProcessor& proc, const juce::String& p
 
     onStateChange = [this]
     {
+        // a plate that carries two processors (COMP + LIMIT, MOD + TRNS, ...)
+        // throws one rocker for both of them
+        if (second != nullptr)
+        {
+            const float v = getToggleState() ? 1.0f : 0.0f;
+
+            if (std::abs (second->getValue() - v) > 0.001f)
+                second->setValueNotifyingHost (v);
+        }
+
         repaint();
         if (onToggle) onToggle();
     };
@@ -423,7 +439,8 @@ void PowerSwitch::refresh()
 {
     if (param == nullptr) return;
 
-    const bool now = param->getValue() >= 0.5f;
+    const bool now = param->getValue() >= 0.5f
+                       && (second == nullptr || second->getValue() >= 0.5f);
 
     if (now != getToggleState())
     {
@@ -437,28 +454,19 @@ void PowerSwitch::paintButton (juce::Graphics& g, bool over, bool)
     auto area = getLocalBounds().toFloat();
 
     const bool on = getToggleState();
-    juce::Rectangle<float> slot = area;
-    juce::Rectangle<float> lamp;
-    const bool tight = compactStyle || area.getWidth() < 60.0f;
 
-    if (tight)
-    {
-        const float sh = juce::jmin (area.getHeight(), 18.0f);
-        const float sw = juce::jmin (area.getWidth() - 14.0f, 46.0f);
+    const float sh = juce::jmin (area.getHeight(), 18.0f);
+    const float sw = juce::jlimit (18.0f, 40.0f, area.getWidth() - 20.0f);
 
-        slot = { area.getX(), area.getCentreY() - sh * 0.5f, sw, sh };
-        lamp = { slot.getRight() + 6.0f, area.getCentreY() - 3.0f, 6.0f, 6.0f };
-    }
-    else
-    {
-        slot = area.withWidth (juce::jmin (area.getWidth(), 46.0f));
-        lamp = { slot.getRight() + 10.0f, area.getCentreY() - 4.0f, 8.0f, 8.0f };
-    }
+    const juce::Rectangle<float> slot (area.getX(), area.getCentreY() - sh * 0.5f, sw, sh);
+    const juce::Rectangle<float> lamp (slot.getRight() + 5.5f, area.getCentreY() - 3.4f,
+                                       6.8f, 6.8f);
+    const bool tight = compactStyle;
 
     art::rocker (g, slot, on, over);
 
     const auto lc = lamp.getCentre();
-    const float lr = tight ? 3.0f : 3.6f;
+    const float lr = 3.2f;
 
     if (on)
     {
@@ -478,10 +486,11 @@ void PowerSwitch::paintButton (juce::Graphics& g, bool over, bool)
         g.drawEllipse (lc.x - lr, lc.y - lr, lr * 2.0f, lr * 2.0f, 1.0f);
     }
 
-    if (! tight)
+    if (! tight && area.getWidth() > 64.0f)
     {
         art::text (g, on ? "ON" : "OFF",
-                   area.withTrimmedLeft (lamp.getRight() + 4.0f).withWidth (32.0f),
+                   { lamp.getRight() + 4.0f, area.getY(), area.getRight() - lamp.getRight() - 4.0f,
+                     area.getHeight() },
                    8.2f, on ? softAccent : dimText, juce::Justification::centredLeft,
                    false, 1.2f);
     }
@@ -494,9 +503,10 @@ ModulePanel::ModulePanel (MHSignatureAudioProcessor& p, const juce::String& t)
     setInterceptsMouseClicks (false, true);
 }
 
-void ModulePanel::addPower (const juce::String& paramId, const juce::String& shortName)
+void ModulePanel::addPower (const juce::String& paramId, const juce::String& shortName,
+                            const juce::String& secondId)
 {
-    auto s = std::make_unique<PowerSwitch> (proc, paramId, shortName);
+    auto s = std::make_unique<PowerSwitch> (proc, paramId, shortName, false, secondId);
     s->onToggle = [this] { refreshPowers(); repaint(); };
 
     addAndMakeVisible (*s);
@@ -636,17 +646,18 @@ juce::Rectangle<int> ModulePanel::artBand() const
 
 void ModulePanel::resized()
 {
-    // ---- the rockers, right to left
+    // ---- the rockers, right to left.  A plate that carries two modules gets
+    //      two compact rockers, a plate with one module a single wide one.
     const int n = (int) powers.size();
+    const bool single = n <= 1;
     int px = getWidth() - 30;
 
     for (int i = n - 1; i >= 0; --i)
     {
-        const bool single = n == 1;
-        const int w = single ? 84 : 44;
+        const int w = single ? 96 : 44;
         px -= w;
-        powers[(size_t) i]->setBounds (px, single ? 10 : 11, w, single ? 18 : 16);
-        px -= single ? 0 : 8;
+        powers[(size_t) i]->setBounds (px, 8, w, 20);
+        px -= single ? 0 : 10;
     }
 
     if (customLayout) customLayout();
@@ -662,65 +673,64 @@ void ModulePanel::resized()
 
     if (active.empty()) return;
 
-    // ---- two half-height modules in one plate (MOTION)
+    const int count = (int) active.size();
+    const int top = dialTop (chipRow ? 24.0f : 0.0f, artHeight);
+    const int boxW = juce::jmax (1, getWidth() - 32);
+    const int boxH = juce::jmax (1, getHeight() - 8 - top);
+
+    // ---- two half-height modules in one plate (MOTION) --------------------
     if (sections.size() > 0)
     {
         const int secs = sections.size();
-        const int top = 48;
-        const int rowH = juce::jmax (1, (getHeight() - 8 - top) / secs);
-        const int total = (int) active.size();
-        const int perSec = (total + secs - 1) / secs;
+        const int rowH = juce::jmax (1, (getHeight() - 8 - 48) / secs);
+        const int perSec = (count + secs - 1) / secs;
 
-        for (int a = 0; a < total; ++a)
+        for (int a = 0; a < count; ++a)
         {
             const int i = active[(size_t) a];
-            const int sec = a / perSec;
-            const int ci = a % perSec;
-            const int count = juce::jmin (perSec, total - sec * perSec);
+            const int sec = a / juce::jmax (1, perSec);
+            const int ci = a % juce::jmax (1, perSec);
+            const int cnt = juce::jmin (perSec, count - sec * perSec);
 
-            const int slotW = juce::jmax (1, (getWidth() - 32) / juce::jmax (1, count));
-            const int boxH = juce::jmax (1, rowH - 18);
+            const int slotW = juce::jmax (1, boxW / juce::jmax (1, cnt));
+            const int secH = juce::jmax (1, rowH - 18);
 
-            const float r = juce::jlimit (9.0f, 60.0f,
-                                          juce::jmin ((float) (slotW - 30) * 0.5f,
-                                                      (float) (boxH - 52) * 0.5f, maxR));
+            const float r = juce::jlimit (6.0f, 64.0f,
+                                          juce::jmin ((float) slotW * 0.5f - 13.0f,
+                                                      (float) secH * 0.5f - 23.0f, maxR));
             const int rr = (int) std::floor (r);
-            const int blockH = juce::jmin (2 * rr + 52, boxH);
+            const int blockH = juce::jmin (2 * rr + 46, juce::jmax (30, secH - 2));
+            const int drop = juce::jmax (0, secH - blockH) / 2;
 
             knobs[(size_t) i]->setBounds (16 + ci * slotW,
-                                          top + rowH * sec + 16 + (boxH - blockH) / 2,
+                                          48 + rowH * sec + 16 + drop,
                                           slotW, blockH);
         }
 
         return;
     }
 
-    const auto box = dialBox();
-    if (box.getHeight() < 30 || box.getWidth() < 40) return;
+    if (boxH < 30 || boxW < 40) return;
 
-    const int count = (int) active.size();
     const int rows = juce::jmax (1, rowsWanted);
+    const int per = juce::jmax (1, (count + rows - 1) / rows);
+    const int slotW = juce::jmax (1, boxW / per);
+    const int slotH = juce::jmax (1, boxH / rows);
 
-    if (count > 0 && rows > 1 && box.getHeight() / rows < 60) return;
-    const int perRow = (count + rows - 1) / rows;
-    const int slotW = box.getWidth() / juce::jmax (1, perRow);
-    const int slotH = box.getHeight() / rows;
-
-    const float r = juce::jlimit (9.0f, 60.0f,
-                                  juce::jmin ((float) (slotW - 30) * 0.5f,
-                                              (float) (slotH - 52) * 0.5f, maxR));
+    const float r = juce::jlimit (6.0f, 64.0f,
+                                  juce::jmin ((float) slotW * 0.5f - 13.0f,
+                                              (float) slotH * 0.5f - 23.0f, maxR));
     const int rr = (int) std::floor (r);
-    const int blockH = juce::jmin (2 * rr + 52, slotH);
-
+    const int blockH = juce::jmin (2 * rr + 46, juce::jmax (30, slotH - 2));
     const int slack = juce::jmax (0, slotH - blockH);
 
     for (int a = 0; a < count; ++a)
     {
-        const int ri = a / perRow, ci = a % perRow;
+        const int ri = a / per, ci = a % per;
         const int drop = rows == 1 ? juce::jmax (0, slack - 4) : slack / 2;
 
-        knobs[(size_t) active[(size_t) a]]->setBounds (box.getX() + ci * slotW,
-                                                       box.getY() + ri * slotH + drop,
+        knobs[(size_t) active[(size_t) a]]->setBounds (16 + ci * slotW,
+                                                       top + ri * slotH + drop,
                                                        slotW, blockH);
     }
 }
@@ -738,8 +748,7 @@ void ModulePanel::paint (juce::Graphics& g)
 
     if (readout.isNotEmpty())
     {
-        const float right = (float) getWidth() - 30.0f
-                              - (powers.empty() ? 0.0f : (powers.size() == 1 ? 90.0f : 100.0f));
+        const float right = (float) getWidth() - 30.0f - (powers.empty() ? 0.0f : 100.0f);
         art::text (g, readout, { right - 110.0f, 8.0f, 110.0f, 24.0f }, 8.2f, dimText,
                    juce::Justification::centredRight, false, 1.1f);
     }
@@ -1105,6 +1114,37 @@ void AnalyserPanel::mouseUp (const juce::MouseEvent& e)
 }
 
 //==============================================================================
+namespace
+{
+    struct ChainRow { const char* name; const char* id; };
+
+    /** the order of the signal path; a null id means the row has no switch */
+    const ChainRow chainRows[] = {
+        { "ENGINE",     nullptr },
+        { "EQ",         Params::eqOn },
+        { "DYNAMICS",   Params::dynOn },
+        { "LIMITER",    Params::limOn },
+        { "COLOUR",     Params::satOn },
+        { "VOCAL",      Params::vocOn },
+        { "REVERB",     Params::revOn },
+        { "DELAY",      Params::dlyOn },
+        { "MODULATION", Params::modOn },
+        { "TRANSIENT",  Params::trnOn },
+        { "IMAGER",     Params::imgOn }
+    };
+
+    constexpr int   numChainRows = (int) juce::numElementsInArray (chainRows);
+    constexpr float chainRowY0   = 52.0f;
+    constexpr float chainRowStep = 25.0f;
+    constexpr float chainHitTop  = 40.0f;
+
+    inline int chainRowAt (float y)
+    {
+        const int i = (int) std::floor ((y - chainRowY0 + chainRowStep * 0.5f) / chainRowStep);
+        return (i >= 0 && i < numChainRows) ? i : -1;
+    }
+}
+
 ChainRail::ChainRail (MHSignatureAudioProcessor& p) : proc (p)
 {
     inKnob  = std::make_unique<MhKnob> (proc, Params::ioInput,  "IN",  Fmt::db1, false);
@@ -1115,6 +1155,12 @@ ChainRail::ChainRail (MHSignatureAudioProcessor& p) : proc (p)
 
     monoSwitch   = std::make_unique<PowerSwitch> (proc, Params::ioMono,   "MONO", true);
     bypassSwitch = std::make_unique<PowerSwitch> (proc, Params::ioBypass, "BYPASS", true);
+
+    monoSwitch->setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    bypassSwitch->setMouseCursor (juce::MouseCursor::PointingHandCursor);
+
+    monoSwitch->onToggle   = [this] { repaint(); };
+    bypassSwitch->onToggle = [this] { repaint(); };
 
     monoSwitch->setTooltip ("Mono: folds the output to a single channel");
     bypassSwitch->setTooltip ("Bypass: takes the whole chain out");
@@ -1136,16 +1182,19 @@ void ChainRail::refresh()
 
 void ChainRail::resized()
 {
-    const int w = getWidth();
-    const int uy = 682;                      // the utility block, in design units
+    const int uy = getHeight() - 118;               // the utility block, in design units
 
-    inKnob->setBounds  (18, uy + 19, 56, 74);   // dial centre (46, uy + 34), r = 15
-    outKnob->setBounds (72, uy + 19, 56, 74);   // dial centre (100, uy + 34)
+    // dial centre (52, uy + 54), r = 16
+    inKnob->setBounds  (23, uy + 22, 58, 76);
+    outKnob->setBounds (87, uy + 22, 58, 76);
 
-    monoSwitch->setBounds   (138, uy + 24, 52, 18);
-    bypassSwitch->setBounds (138, uy + 48, 52, 18);
+    monoSwitch->setBounds   (150, uy + 22, 60, 16);
+    bypassSwitch->setBounds (150, uy + 48, 60, 16);
 
-    juce::ignoreUnused (w);
+    inKnob->toFront (false);
+    outKnob->toFront (false);
+    monoSwitch->toFront (false);
+    bypassSwitch->toFront (false);
 }
 
 void ChainRail::paint (juce::Graphics& g)
@@ -1255,9 +1304,9 @@ void ChainRail::paint (juce::Graphics& g)
     art::text (g, "UTILITY / I/O", { 20.0f, uy - 8.0f, 160.0f, 18.0f }, 8.6f, ink2,
                juce::Justification::centredLeft, false, 2.2f);
 
-    art::text (g, "MONO", { 194.0f, uy + 24.0f, 70.0f, 18.0f }, 7.6f, dimText,
+    art::text (g, "MONO", { 206.0f, uy + 21.0f, 70.0f, 18.0f }, 7.6f, dimText,
                juce::Justification::centredLeft, false, 1.4f);
-    art::text (g, "BYPASS", { 194.0f, uy + 48.0f, 70.0f, 18.0f }, 7.6f, dimText,
+    art::text (g, "BYPASS", { 206.0f, uy + 47.0f, 70.0f, 18.0f }, 7.6f, dimText,
                juce::Justification::centredLeft, false, 1.4f);
 }
 
@@ -1289,7 +1338,7 @@ void TabStrip::paint (juce::Graphics& g)
         auto tb = tabBounds (i);
         const bool on = i == current;
 
-        art::text (g, items[i], { tb.getX(), 8.0f, tb.getWidth(), 22.0f }, 10.4f,
+        art::text (g, items[i], { tb.getX(), 6.0f, tb.getWidth(), 22.0f }, 10.4f,
                    on ? ink : (i == hovered ? ink2 : muted),
                    juce::Justification::centred, false, 2.2f);
 
@@ -1823,8 +1872,7 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
 
     // --------------------------------------------------------------- DYNAMICS
     dynPanel = std::make_unique<ModulePanel> (proc, "DYNAMICS");
-    dynPanel->addPower (Params::dynOn, "COMP");
-    dynPanel->addPower (Params::limOn, "LIMIT");
+    dynPanel->addPower (Params::dynOn, "DYNAMICS", Params::limOn);
     dynPanel->addKnob (Params::dynThr,     "THRESH",  Fmt::db1);
     dynPanel->addKnob (Params::dynRatio,   "RATIO",   Fmt::ratio);
     dynPanel->addKnob (Params::dynAtt,     "ATTACK",  Fmt::ms);
@@ -1874,8 +1922,7 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
 
     // --------------------------------------------------------------------- SPACE
     revPanel = std::make_unique<ModulePanel> (proc, "SPACE");
-    revPanel->addPower (Params::revOn, "REVERB");
-    revPanel->addPower (Params::dlyOn, "DELAY");
+    revPanel->addPower (Params::revOn, "SPACE", Params::dlyOn);
     revPanel->addKnob (Params::revDecay, "DECAY",  Fmt::sec1);
     revPanel->addKnob (Params::revPre,   "PREDLY", Fmt::ms);
     revPanel->addKnob (Params::revDamp,  "DAMP",   Fmt::pct0);
@@ -1901,8 +1948,7 @@ Canvas::Canvas (MHSignatureAudioProcessor& p) : proc (p)
 
     // ------------------------------------------------------------------- MOTION
     modPanel = std::make_unique<ModulePanel> (proc, "MOTION");
-    modPanel->addPower (Params::modOn, "MOD");
-    modPanel->addPower (Params::trnOn, "TRNS");
+    modPanel->addPower (Params::modOn, "MOTION", Params::trnOn);
     modPanel->addKnob (Params::modRate,  "RATE",    Fmt::raw1);
     modPanel->addKnob (Params::modDepth, "DEPTH",   Fmt::pct0);
     modPanel->addKnob (Params::modMix,   "MIX",     Fmt::pct0);
@@ -1966,7 +2012,7 @@ void Canvas::showPage (Page p)
 
 void Canvas::buildLayout()
 {
-    tabs->setBounds (496, 11, 560, 42);
+    tabs->setBounds (496, 11, 488, 42);
     presetBar->setBounds (1120, 10, 232, 42);
 
     ModulePanel* const panels[] = { enginePanel.get(), eqPanel.get(), dynPanel.get(),
@@ -2118,7 +2164,7 @@ void Canvas::paint (juce::Graphics& g)
     g.fillAll (noir);
 
     // ------------------------------------------------------------- portrait rail
-    const juce::Rectangle<float> railArea (8.0f, 66.0f, 192.0f, 792.0f);
+    const juce::Rectangle<float> railArea (8.0f, 66.0f, 200.0f, 858.0f - 66.0f);
 
     if (portrait.isValid())
     {
@@ -2164,16 +2210,17 @@ void Canvas::paint (juce::Graphics& g)
         g.setColour (accent.withAlpha (0.85f));
         g.strokePath (flourish, juce::PathStrokeType (1.2f, juce::PathStrokeType::curved));
 
-        art::text (g, "MUSIC  \xc2\xb7  PEOPLE  \xc2\xb7  EMOTION",
-                   { railArea.getX(), 666.0f, railArea.getWidth(), 16.0f },
-                   7.2f, juce::Colour (0xffcbc3bd), juce::Justification::centred, false, 1.8f);
-        art::text (g, "ALWAYS", { railArea.getX(), 684.0f, railArea.getWidth(), 16.0f },
-                   7.2f, juce::Colour (0xffcbc3bd), juce::Justification::centred, false, 1.8f);
+        art::text (g, "MUSIC  \xc2\xb7  PEOPLE",
+                   { railArea.getX(), 667.0f, railArea.getWidth(), 14.0f },
+                   6.4f, juce::Colour (0xffcbc3bd), juce::Justification::centred, false, 1.8f);
+        art::text (g, "EMOTION  \xc2\xb7  ALWAYS",
+                   { railArea.getX(), 681.0f, railArea.getWidth(), 14.0f },
+                   6.4f, juce::Colour (0xffcbc3bd), juce::Justification::centred, false, 1.8f);
 
-        art::text (g, "VERSION 1.0.0", { railArea.getX(), 786.0f, railArea.getWidth(), 16.0f },
-                   7.2f, faint, juce::Justification::centred, false, 2.6f);
-        art::text (g, "MH SIGNATURE", { railArea.getX(), 818.0f, railArea.getWidth(), 16.0f },
-                   7.0f, juce::Colour (0xff8b9199), juce::Justification::centred, false, 3.6f);
+        art::text (g, "VERSION 1.0.0", { railArea.getX(), 783.0f, railArea.getWidth(), 14.0f },
+                   6.6f, faint, juce::Justification::centred, false, 2.8f);
+        art::text (g, "MH SIGNATURE", { railArea.getX(), 813.0f, railArea.getWidth(), 14.0f },
+                   6.4f, juce::Colour (0xff7c828b), juce::Justification::centred, false, 3.4f);
 
         g.setColour (juce::Colour (0xff22262c));
         g.drawLine (railArea.getRight() + 0.5f, railArea.getY(), railArea.getRight() + 0.5f,
