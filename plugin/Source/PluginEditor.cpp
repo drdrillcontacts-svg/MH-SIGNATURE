@@ -1185,6 +1185,40 @@ ChainRail::~ChainRail() = default;
 
 void ChainRail::setActive (const juce::String& name) { active = name; repaint(); }
 
+//------------------------------------------------------------------------------
+void ChainRail::mouseMove (const juce::MouseEvent& e)
+{
+    const int row = chainRowAt (e.position.y);
+
+    if (row != hoveredRow)
+    {
+        hoveredRow = row;
+        setMouseCursor (row >= 0 && chainRows[row].id != nullptr
+                          ? juce::MouseCursor::PointingHandCursor
+                          : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+}
+
+void ChainRail::mouseExit (const juce::MouseEvent&)
+{
+    hoveredRow = -1;
+    setMouseCursor (juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+void ChainRail::mouseUp (const juce::MouseEvent& e)
+{
+    const int row = chainRowAt (e.position.y);
+
+    if (row < 0 || chainRows[row].id == nullptr) return;
+
+    if (auto* p = proc.apvts.getParameter (chainRows[row].id))
+        p->setValueNotifyingHost (p->getValue() >= 0.5f ? 0.0f : 1.0f);
+
+    repaint();
+}
+
 void ChainRail::refresh()
 {
     monoSwitch->refresh();
@@ -1253,6 +1287,12 @@ void ChainRail::paint (juce::Graphics& g)
             g.setColour (hot ? juce::Colour (0xff1c1614) : juce::Colour (0xff14161a));
         if (i % 2 == 0)
             g.fillRoundedRectangle (14.0f, y - 9.0f, r.getWidth() - 28.0f, 18.0f, 2.0f);
+
+        if (i == hoveredRow && row.id != nullptr)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.035f));
+            g.fillRoundedRectangle (14.0f, y - 9.0f, r.getWidth() - 28.0f, 18.0f, 2.0f);
+        }
 
         if (hot)
         {
